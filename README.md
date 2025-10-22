@@ -34,10 +34,8 @@
 - [昇思开发者布道师](#昇思开发者布道师)
     - [认证](#认证)
     - [昇思同路人：昇思开发者布道师系列故事](#昇思同路人昇思开发者布道师系列故事)
-- [学术科研]()
+- [学术科研](#学术科研)
 - [Docker镜像](#docker镜像)
-    - [Docker镜像使用](#docker镜像使用)
-    - [Docker镜像测试](#docker镜像测试)
 - [贡献与反馈](#贡献与反馈)
     - [Issue提交规范](#issue提交规范)
     - [PR提交规范](#pr提交规范)
@@ -199,54 +197,8 @@
 
 ## Docker镜像
 
-为方便开发者更加便捷地进行代码实践，节约环境准备的时间，我们提供了预装好的基础Docker镜像。课程的所有镜像已托管在[XXX平台](Docker平台链接)上。目前容器化构建选项支持如下：
+为方便开发者更加便捷地进行代码实践，节约环境准备的时间，我们提供了预装好的基础Docker镜像。对应课程的Docker镜像获取及使用指南可参考对应项目仓README。
 
-| 硬件平台 | Docker镜像仓库  | 标签      |  说明                     |
-| :------ | :-------------- | :------- | :------------------------ |
-| CPU     | xxx             | xxx      | xxx                       |
-| GPU     | xxx             | xxx      | xxx                       |
-| NPU     | xxx             | xxx      | xxx                       |
-
-开发者可根据对应课程的推荐镜像进行镜像的拉取和运行。
-
-### Docker镜像使用
-
-- CPU
-
-    ```bash
-    docker pull xxx:xxx
-    docker run -it xxx:xxx /bin/bash
-    ```
-
-- GPU
-
-    ```bash
-    docker pull xxx:xxx
-    docker run -it xxx:xxx -v xxx --runtime=nvidida /bin/bash
-    ```
-
-- NPU
-
-    ```bash
-    docker pull xxx:xxx
-    docker run -it xxx:xxx
-    -v xxx \
-    --device /dev/davinci0 \
-    --device=/dev/davinci1 \
-    --device=/dev/davinci2 \
-    --device=/dev/davinci3 \
-    --device /dev/davinci_manager \
-    --device /dev/devmm_svm \
-    --device /dev/hisi_hdc \
-    /bin/bash
-    ```
-
-### Docker镜像测试
-
-如希望测试Docker是否正常工作，可运行如下Python代码并检查输出：
-```python
-# mindspore 测试
-```
 ## 贡献与反馈
 
 欢迎各位开发者在对应项目仓中，通过 Issue 提交建议或 bug 反馈，也可直接发起 PR 进行Bug修复或代码贡献（提交前请参考仓库贡献规范，由项目仓对应Committer完成评审合入），你的每一份参与都能让项目仓更加完善。

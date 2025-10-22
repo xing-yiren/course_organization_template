@@ -51,15 +51,15 @@
 本项目支持在CPU/GPU/NPU（根据实际情况进行删减）上运行，[昇思大模型平台](https://xihe.mindspore.cn/)提供免费NPU算力，平台基础使用可参考[本教程](https://docs.xihe.mindspore.cn/zh/tutorial/jupyter/)。
 
 ### Docker镜像
-为方便开发者更加便捷地进行代码实践，节约环境准备的时间，我们提供了预装好的基础Docker镜像。课程的所有镜像已托管在[XXX平台](Docker平台链接)上。本课程推荐使用镜像如下：
+为方便开发者更加便捷地进行代码实践，节约环境准备的时间，我们提供了预装好的基础Dockerfile文件。课程的所有镜像可从[dockerfile](./dockerfile/)。本课程镜像文件信息如下，开发者可根据实际需求进行拉取：
 
-| 硬件平台 | Docker镜像仓库  | 标签      |  说明                     |
-| :------ | :-------------- | :------- | :------------------------ |
-| CPU     | xxx             | xxx      | xxx                       |
-| GPU     | xxx             | xxx      | xxx                       |
-| NPU     | xxx             | xxx      | xxx                       |
+| 硬件平台 | 镜像名称        | 标签      |  说明                     | Dockerfile文件 |
+| :------ | :-------------- | :------- | :------------------------ | :------------- |
+| CPU     | xxx             | xxx      | xxx                       | xxx            |
+| GPU     | xxx             | xxx      | xxx                       | xxx            |
+| NPU     | xxx             | xxx      | xxx                       | xxx            |
 
-镜像基础使用和测试教程详见：[Docker镜像使用](../README.md#docker镜像使用)
+镜像基础使用和测试教程详见：[Docker镜像使用](./dockerfile/README.md)
 
 ## 快速入门
 
