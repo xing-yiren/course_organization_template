@@ -81,7 +81,7 @@
 
 ## 交流
 
-<div style="display: flex; gap: 20px; flex-wrap: wrap; justify-content: center;">
+<div style="width: 100%; white-space: nowrap; overflow-x: auto; display: flex; gap: 20px; flex-wrap: wrap; justify-content: center;">
   <div style="text-align: center;">
     <img src="images/wechat_assistant.png" alt="wechat-assistant" style="width: 200px; height: auto;">
     <p style="margin-top: 8px; font-size: 14px;">添加微信小助手，邀请进群</p>
