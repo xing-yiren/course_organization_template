@@ -85,14 +85,14 @@
   <div style="flex: 0 0 350px; text-align: center;">
     <img src="./images/wechat_assistant.png" 
          alt="wechat-assistant"
-         style="width: 100%; height: auto; border-radius: 4px; border: 1px solid #eee;">
+         style="width: 40%; height: auto; border-radius: 4px; border: 1px solid #eee;">
     <p style="margin: 8px 0 0 0; font-size: 14px;line-height: 1.5;">添加微信小助手，邀请进群</p>
   </div>
 
   <div style="flex: 0 0 350px; text-align: center;">
     <img src="./images/qq_group_chat.png" 
          alt="qq-group-chat" 
-         style="width: 100%; height: auto; border-radius: 4px; border: 1px solid #eee;">
+         style="width: 40%; height: auto; border-radius: 4px; border: 1px solid #eee;">
     <p style="margin: 8px 0 0 0; font-size: 14px; line-height: 1.5;">QQ交流群</p>
   </div>
 </div>
