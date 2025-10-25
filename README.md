@@ -37,7 +37,7 @@
         <td>2</td>
         <td>教材教辅</td>
         <td><a href="https://e.huawei.com/cn/talent/outPage/#/sxz-course/home?courseId=K--4yKm9T9VTCjwXOw5VyL66JpI">人工智能：原理与应用</a></td>
-        <td>@usrname</td>
+        <td>-</td>
     <tr>
         <td>3</td>
         <td>应用案例</td>
@@ -48,7 +48,7 @@
         <td>4</td>
         <td>比赛</td>
         <td><a href="https://github.com/mindspore-courses/competition">比赛（competition）</a></td>
-        <td>-</td>
+        <td>@usrname</td>
     </tr>
     <tr>
         <td>5</td>
