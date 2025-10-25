@@ -81,13 +81,18 @@
 
 ## 交流
 
-<div style="width: 100%; white-space: nowrap; overflow-x: auto; display: flex; gap: 20px; flex-wrap: wrap; justify-content: center;">
-  <div style="text-align: center;">
-    <img src="images/wechat_assistant.png" alt="wechat-assistant" style="width: 200px; height: auto;">
-    <p style="margin-top: 8px; font-size: 14px;">添加微信小助手，邀请进群</p>
+<div style="display: flex; align-items: flex-start; gap: 20px; width: 100%; overflow-x: auto; padding: 10px 0;">
+  <div style="flex: 0 0 350px; text-align: center;">
+    <img src="./images/wechat_assistant.png" 
+         alt="wechat-assistant"
+         style="width: 100%; height: auto; border-radius: 4px; border: 1px solid #eee;">
+    <p style="margin: 8px 0 0 0; font-size: 14px;line-height: 1.5;">添加微信小助手，邀请进群</p>
   </div>
-  <div style="text-align: center;">
-    <img src="images/qq_group_chat.png" alt="qq-group-chat" style="width: 200px; height: auto;">
-    <p style="margin-top: 8px; font-size: 14px;">QQ交流群</p>
+
+  <div style="flex: 0 0 350px; text-align: center;">
+    <img src="./images/qq_group_chat.png" 
+         alt="qq-group-chat" 
+         style="width: 100%; height: auto; border-radius: 4px; border: 1px solid #eee;">
+    <p style="margin: 8px 0 0 0; font-size: 14px; line-height: 1.5;">QQ交流群</p>
   </div>
 </div>
