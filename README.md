@@ -1,5 +1,6 @@
 <div align=center>
   <h1>昇思MindSpore技术生态资源</h1>
+  <p><a href="./README_EN.md">View English</a></p>
 </div>
 
 <p>汇聚技术公开课、教材教辅、应用案例、赛事活动、认证体系及学术科研等全链路学习资源，助力开发者一站式了解、熟悉并掌握 MindSpore，高效完成学习与科研任务，积累扎实的实践经验。</p>

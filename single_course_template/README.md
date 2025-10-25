@@ -1,5 +1,6 @@
 <div align=center>
   <h1>课程名称</h1>
+  <p><a href="./README_EN.md">View English</a></p>
 </div>
 
 （1-2句话点名项目核心价值）项目仓介绍。
@@ -70,7 +71,7 @@ pip install requirements.txt
 
 ## 贡献与反馈
 
-欢迎各位开发者通过 Issue 提交建议或 bug 反馈，也可直接发起 PR 进行Bug修复或代码贡献（提交前请参考提交规范，由Committer @username 完成评审合入），你的每一份参与都能让本项目更加完善。
+欢迎各位开发者通过 [Issue](Issue链接) 提交建议或 bug 反馈，也可直接发起 [PR](PR链接) 进行Bug修复或代码贡献（提交前请参考提交规范，由Committer @username 完成评审合入），你的每一份参与都能让本项目更加完善。
 
 ### 提交规范
 详见WIKI：[Issue与PR提交规范](WIKI链接)
