@@ -83,12 +83,11 @@
 
 <div style="display: flex; gap: 20px; flex-wrap: wrap; justify-content: center;">
   <div style="text-align: center;">
-    <img src="images/wechat_assistant.png" alt="wechat-assistant" style="width: 300px; height: auto;">
+    <img src="images/wechat_assistant.png" alt="wechat-assistant" style="width: 200px; height: auto;">
     <p style="margin-top: 8px; font-size: 14px;">添加微信小助手，邀请进群</p>
   </div>
-  <!-- 第二张图片 + 说明 -->
   <div style="text-align: center;">
-    <img src="images/qq_group_chat.png" alt="qq-group-chat" style="width: 300px; height: auto;">
+    <img src="images/qq_group_chat.png" alt="qq-group-chat" style="width: 200px; height: auto;">
     <p style="margin-top: 8px; font-size: 14px;">QQ交流群</p>
   </div>
 </div>
