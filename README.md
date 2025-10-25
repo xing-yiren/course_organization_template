@@ -73,16 +73,16 @@
     <img alt="mindspore-website" src="https://github.com/mindspore-courses/.github/blob/master/profile/mindspore-website.png" width="27%">
   </a>
   <a href="https://gitee.com/mindspore">
-    <img alt="mindspore-gitee" src="https://github.com/mindspore-courses/.github/blob/master/profile/mindspore-gitee.png" width="30%">
+    <img alt="mindspore-gitee" src="https://github.com/mindspore-courses/.github/blob/master/profile/mindspore-gitee.png" width="10%">
   </a>
   <a href="https://github.com/mindspore-lab">
-    <img alt="mindspore-lab" src="https://github.com/mindspore-courses/.github/blob/master/profile/mindspore-lab.png" width="30%">
+    <img alt="mindspore-lab" src="https://github.com/mindspore-courses/.github/blob/master/profile/mindspore-lab.png" width="10%">
   </a>
 </div>
 
 ## 交流
 
 <div align=center>
-<img alt="wechat-assistant" src="./images/wechat_assistant.png" width="30%">
-<img alt="qq-group-chat" src="./images/qq_group_chat.png" width="30%">
+<img alt="wechat-assistant" src="./images/wechat_assistant.png" width="20%">
+<img alt="qq-group-chat" src="./images/qq_group_chat.png" width="20%">
 </div>
