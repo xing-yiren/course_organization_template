@@ -38,13 +38,13 @@
     <tr>
         <td>2</td>
         <td>Application Examples</td>
-        <td><a href="https://github.com/mindspore-courses/applications">applications</a></td>
+        <td><a href="https://github.com/mindspore-courses/applications">Access the Repository</a></td>
         <td>@usrname</td>
     </tr>
     <tr>
         <td>3</td>
         <td>Competitions</td>
-        <td><a href="https://github.com/mindspore-courses/competition">competition</a></td>
+        <td><a href="https://github.com/mindspore-courses/competition">Access the Repository</a></td>
         <td>@usrname</td>
     </tr>
     <tr>
