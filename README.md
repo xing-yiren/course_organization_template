@@ -83,6 +83,10 @@
 </div>
 
 ## Join the Community
+<div align="center">
+
 | <img alt="wechat-assistant" src="./images/wechat_assistant.png" width="200px">| <img alt="qq-group-chat" src="./images/qq_group_chat.png" width="200px"> |
 | :-----------------------: | :-----------------------: |
 | Add the WeChat Assistant to Join the Group | Scan to join Our QQ Group |
+
+</div>
