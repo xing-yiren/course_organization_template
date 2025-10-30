@@ -8,9 +8,11 @@ labels: bug
 A clear and concise description of what the bug is.
 
 ### Steps to Reproduce
-1. Step 1  
-2. Step 2  
-3. Step 3  
+Example:
+1. Go to '...'
+2. Click on '....'
+3. Scroll down to '....'
+4. See error
 
 ### Expected Behavior
 Describe what you expected to happen.
@@ -19,11 +21,24 @@ Describe what you expected to happen.
 Describe what actually happened (include error messages if any).
 
 ### Environment
-- OS:  
-- Python version:  
-- MindSpore version:  
-- MindSpore NLP version (if applicable):  
-- Repository branch:  
+- **Hardware Environment(`Ascend`/`GPU`/`CPU`)**:
+> Please delete the backend not involved:
+> /device ascend/GPU/CPU/kirin/others
+
+- **Software Environment (Mandatory)**:
+-- MindSpore version (e.g., 1.7.0.Bxxx) :
+-- Python version (e.g., Python 3.7.5) :
+-- OS platform and distribution (e.g., Linux Ubuntu 16.04):
+-- GCC/Compiler version (if compiled from source):
+
+- **Excute Mode / 执行模式 (Mandatory)(`PyNative`/`Graph`)**:
+> Please delete the mode not involved:
+> /mode pynative
+> /mode graph
+
+- **Repository branch**
+> Please provide related branch:
+> /branch master
 
 ### Additional Context / Screenshots
 Add any other context, logs, or screenshots that might help.
