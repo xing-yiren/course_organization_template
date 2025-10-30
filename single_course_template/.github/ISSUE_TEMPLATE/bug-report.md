@@ -31,7 +31,7 @@ Describe what actually happened (include error messages if any).
 -- OS platform and distribution (e.g., Linux Ubuntu 16.04):
 -- GCC/Compiler version (if compiled from source):
 
-- **Excute Mode / 执行模式 (Mandatory)(`PyNative`/`Graph`)**:
+- **Excute Mode (Mandatory)(`PyNative`/`Graph`)**:
 > Please delete the mode not involved:
 > /mode pynative
 > /mode graph
