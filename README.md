@@ -28,11 +28,11 @@
         <td>@usrname</td>
     </tr>
     <tr>
-        <td><a href="https://github.com/mindspore-courses/orange-pi-mindspore">MindSpore + Ascend Board: Hands-On Large Language Model Practice</a></td>
+        <td><a href="https://github.com/mindspore-courses/orange-pi-mindspore">MindSpore + Orange Pi: Hands-On Large Language Model Practice</a></td>
         <td>@usrname</td>
     </tr>
     <tr>
-        <td><a href="https://github.com/mindspore-courses/step_into_llm">Special Topcis in Large Language Model</a></td>
+        <td><a href="https://github.com/mindspore-courses/step_into_llm">Step into LLM</a></td>
         <td>@usrname</td>
     </tr>
     <tr>
@@ -54,10 +54,14 @@
         <td>@username</td>
     </tr>
     <tr>
-        <td>5</td>
-        <td>Teaching Materials</td>
+        <td rowspan="2">5</td>
+        <td rowspan="2">Teaching Resources</td>
         <td><a href="https://e.huawei.com/cn/talent/outPage/#/sxz-course/home?courseId=K--4yKm9T9VTCjwXOw5VyL66JpI">Artificial Intelligence: Principles and Applications</a></td>
         <td>-</td>
+    </tr>
+    <tr>
+        <td><a href="https://github.com/mindspore-courses/d2l-mindspore">d2l-mindspore</a></td>
+    </tr>
     <tr>
         <td>6</td>
         <td>MindSpore Developers and Developer Advoacates</td>
