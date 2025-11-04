@@ -1,96 +1,91 @@
 <div align=center>
-  <h1>MindSpore Technical Ecosystem Resources</h1>
-  <p><a href="./README_ZH.md">查看中文</a></p>
+  <h1>Course Title</h1>
+  <p><a href="./README.md">查看中文</a></p>
 </div>
 
-<p>We provide comprehensive end-to-end learning resources——including open courses, teaching materials, application examples, competitions, certifications, and research content——to help developers learn, apply, and master MindSpore effectively. Accelerate your learning and research with practical, hands-on experience.</p>
+Brief introduction to repository.
 
 ## 📢 News
+- **2025-10-21 [Course Update]**：The XXX course has been updated with a new chapter on XXX, including complete videos, slides, and code examples. ([*View details*](xxx))
+- **2025-10-18 [Feature Optimization]**：Repository refactored for clearer course resource navigation; added CI pipeline for more standardized contributions. ([*View details*](xxx))
+- **2025-10-10 [Bug Fix]**：Fixed the xxx issue — thanks to @username for the PR contribution. ([View details](pr_link))
 
-- **Teaching Materials** —— The digital book *Artificial Intelligence: Principles and Applications*, co-developed with Professor Tonghua Su from Harbin Institute of Technology, has been officially published and is now available for online learning! ([*View details*](https://e.huawei.com/cn/talent/outPage/#/sxz-course/home?courseId=K--4yKm9T9VTCjwXOw5VyL66JpI))
-- **Competitions** —— The *MindSpore Model Innovation Challenge - Season 1* is now underway, featuring a 200,000 RMB prize pool. Developers are welcome to register and participate! ([*View details*](https://www.hiascend.com/developer/contests/details/21ffd6733ab54dc4b6b686a242c5d586?module=0d9953a460e14a70be89dd6f3637f487))
+## Prerequisites
 
-- **Application Examples** —— Awesome projects from the *MindSpre Innovation Bootcamp* are continuously being updated. Stay tuned for more!
+Before starting this course, you should be familiar with:
 
-## MindSpore Resource Overview
+- Basic Python programming
+- Basic Linux commands
+- Using Jupyter Notebook
+- Using Docker images
 
-<table>
-    <tr>
-        <th>No.</th>
-        <th>Resources</th>
-        <th>Links</th>
-        <th>Committer</th>
-    </tr>
-    <tr>
-        <td rowspan="3">1</td>
-        <td rowspan="3">MindSpore Technical Open Courses</td>
-        <td><a href="">Deep Learning: Principles and Practice with MindSpore</a></td>
-        <td>@usrname</td>
-    </tr>
-    <tr>
-        <td><a href="https://github.com/mindspore-courses/orange-pi-mindspore">MindSpore + Orange Pi: Hands-On Large Language Model Practice</a></td>
-        <td>@usrname</td>
-    </tr>
-    <tr>
-        <td><a href="https://github.com/mindspore-courses/step_into_llm">Step into LLM</a></td>
-        <td>@usrname</td>
-    </tr>
-    <tr>
-        <td>2</td>
-        <td>Application Examples</td>
-        <td><a href="https://github.com/mindspore-courses/applications">Access the Repository</a></td>
-        <td>@usrname</td>
-    </tr>
-    <tr>
-        <td>3</td>
-        <td>Competitions</td>
-        <td><a href="https://github.com/mindspore-courses/competition">Access the Repository</a></td>
-        <td>@usrname</td>
-    </tr>
-    <tr>
-        <td>4</td>
-        <td>Researches</td>
-        <td></td>
-        <td>@username</td>
-    </tr>
-    <tr>
-        <td rowspan="2">5</td>
-        <td rowspan="2">Teaching Resources</td>
-        <td><a href="https://e.huawei.com/cn/talent/outPage/#/sxz-course/home?courseId=K--4yKm9T9VTCjwXOw5VyL66JpI">Artificial Intelligence: Principles and Applications</a></td>
-        <td>-</td>
-    </tr>
-    <tr>
-        <td><a href="https://github.com/mindspore-courses/d2l-mindspore">d2l-mindspore</a></td>
-    </tr>
-    <tr>
-        <td>6</td>
-        <td>MindSpore Developers and Developer Advoacates</td>
-        <td><a href="https://www.mindspore.cn/developers/en">Apply for Certification</a></td>
-        <td>-</td>
-    </tr>
+You can take the [Prerequisite Test](exam_link) to assess your readiness.
 
-</table>
+## Environment Setup
+
+To ensure all example code runs smoothly, set up your environment using one of the following methods.
+
+### Install Dependencies
+
+Confirm your Python version meets the course requirements, then run:
+
+```bash
+pip install -r requirements.txt
+```
+
+### Use Docker Image
+
+Prebuilt Dockerfiles are provided to simplify environment setup. 
+
+You can find all course images in the [dockerfile](./dockerfile/) directory and pull the one that fits your hardware:
+
+| Platform | Image Name     | Tag      | Description               | Dockerfile     |
+| :------ | :-------------- | :------- | :------------------------ | :------------- |
+| CPU     | xxx             | xxx      | xxx                       | xxx            |
+| GPU     | xxx             | xxx      | xxx                       | xxx            |
+| NPU     | xxx             | xxx      | xxx                       | xxx            |
+
+For details, see [Using Docker Images](./dockerfile/README.md).
+
+## Course Content
+
+| No. | Lesson  | Description      | Learning Resource        | Certification | 
+| :-- | :------ | :--------------- | :----------------------- | :---------- |
+| 1   | xxx     | xxx              | [Slides](link) · [Code](link) · [Video](link) · [Cloud Lab](link) · [Learning Path](link) |  |
+| 2   | xxx     | xxx              | [Slides](link) · [Code](link) · [Video](link) · [Cloud Lab](link) · [Learning Path](link) | [Beginner Certification](link) |
+| 3   | xxx     | xxx              | [Slides](link) · [Code](link) · [Video](link) · [Cloud Lab](link) · [Learning Path](link) |  |
+| 4   | xxx     | xxx              | [Slides](link) · [Code](link) · [Video](link) · [Cloud Lab](link) · [Learning Path](link) | [Intermediate Certification](link) |
+
+*“Cloud Lab” = interactive sandbox with prebuilt environment & resources.*
+
+## Version Management
+
+This repository is updated in sync with **MindSpore** and the **MindSpore NLP** Suite.
+
+New releases of this repository are published approximately **every six months**.
 
 
-## Quick Access to MindSpore
+| Branch/Version  | Python | MindSpore | MindSpore NLP | 
+| :------ | :----- |:------ |:------ |
+| master | xxx    | xxx    | xxx    |
+| r1.0   | xxx    | xxx    | xxx    |
 
-<div align=center>
-  <a href="https://www.mindspore.cn/">
-    <img alt="mindspore-website" src="https://github.com/mindspore-courses/.github/blob/master/profile/mindspore-website.png" width="27%">
+## FAQ
+- **Q1**：xxx
+    - **A**：xxx
+
+## Contributing
+
+We welcome bug reports, suggestions, and code contributions via [Issues](Issue_link) or [PRs](PR_link). Please follow our submission guidelines — all PRs are reviewed and merged by @username. Your contributions make the project stronger!
+
+**Guidelines**: [Issue & PR Submission](WIKI_link)
+
+## Contributors
+
+Special thanks to all contributors for improving this project!
+
+<div align=center style="margin-top: 30px;">
+  <a href="https://github.com/mindspore-courses/xxx/graphs/contributors">
+    <img src="https://contrib.rocks/image?repo=mindspore-courses/xxx" />
   </a>
-  <a href="https://gitee.com/mindspore">
-    <img alt="mindspore-gitee" src="https://github.com/mindspore-courses/.github/blob/master/profile/mindspore-gitee.png" width="30%">
-  </a>
-  <a href="https://github.com/mindspore-lab">
-    <img alt="mindspore-lab" src="https://github.com/mindspore-courses/.github/blob/master/profile/mindspore-lab.png" width="30%">
-  </a>
-</div>
-
-## Join the Community
-<div align="center">
-
-| <img alt="wechat-assistant" src="./images/wechat_assistant.png" width="200px">| <img alt="qq-group-chat" src="./images/qq_group_chat.png" width="200px"> |
-| :-----------------------: | :-----------------------: |
-| Add the WeChat Assistant to Join the Group | Scan to join Our QQ Group |
-
 </div>
