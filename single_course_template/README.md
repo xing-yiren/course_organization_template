@@ -51,10 +51,10 @@ For details, see [Using Docker Images](./dockerfile/README.md).
 
 | No. | Lesson  | Description      | Learning Resource        | Certification | 
 | :-- | :------ | :--------------- | :----------------------- | :---------- |
-| 1   | xxx     | xxx              | [Slides](link) · [Code](link) · [Video](link) · [Cloud Lab](link) |  |
-| 2   | xxx     | xxx              | [Slides](link) · [Code](link) · [Video](link) · [Cloud Lab](link) | [Beginner Certification](link) |
-| 3   | xxx     | xxx              | [Slides](link) · [Code](link) · [Video](link) · [Cloud Lab](link) |  |
-| 4   | xxx     | xxx              | [Slides](link) · [Code](link) · [Video](link) · [Cloud Lab](link) | [Intermediate Certification](link) |
+| 1   | xxx     | xxx              | [Slides](link) · [Code](link) · [Video](link) · [Cloud Lab](link) · [Learning Path](link) |  |
+| 2   | xxx     | xxx              | [Slides](link) · [Code](link) · [Video](link) · [Cloud Lab](link) · [Learning Path](link) | [Beginner Certification](link) |
+| 3   | xxx     | xxx              | [Slides](link) · [Code](link) · [Video](link) · [Cloud Lab](link) · [Learning Path](link) |  |
+| 4   | xxx     | xxx              | [Slides](link) · [Code](link) · [Video](link) · [Cloud Lab](link) · [Learning Path](link) | [Intermediate Certification](link) |
 
 *“Cloud Lab” = interactive sandbox with prebuilt environment & resources.*
 
