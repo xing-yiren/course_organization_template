@@ -47,7 +47,7 @@ from .utils import CfgNode as CN
 #         one = ops.ones((), self.scale_value.dtype)
 #         scale_mul_factor = self.scale_value * self.scale_factor
 
-#         scale_value = select(grads_finite, 
+#         scale_value = select(grads_finite,
 #                              select(self.counter==(self.scale_window-1),
 #                                     select(ops.isfinite(scale_mul_factor),
 #                                            scale_mul_factor,self.scale_value),self.scale_value),
@@ -137,7 +137,7 @@ class Trainer:
             logits = logits.float()
             loss = mint.nn.functional.cross_entropy(
                 logits.view(-1, logits.shape[-1]),
-                y.view(-1), 
+                y.view(-1),
                 ignore_index=-1
             )
 
@@ -170,7 +170,7 @@ class Trainer:
             # is_finite = amp.all_finite(grads)
             # if is_finite:
             #     unscaled_grads = loss_scaler.unscale(grads)
-            #     unscaled_grads = clip_by_norm(unscaled_grads, config.grad_norm_clip) 
+            #     unscaled_grads = clip_by_norm(unscaled_grads, config.grad_norm_clip)
             #     # 梯度裁剪
             #     self.optimizer(unscaled_grads)
             # 梯度裁剪与优化步
@@ -190,4 +190,4 @@ class Trainer:
             # 终止条件
             if config.max_iters is not None and self.iter_num >= config.max_iters:
                 break
-                    
+
