@@ -24,9 +24,9 @@ jobs:
           HARDWARE_LABELS=$(echo "$HARDWARE_RAW" | grep -oP '\[x\] \K.*' | tr '[:upper:]' '[:lower:]' | tr '\n' ',' | sed 's/,$//')
           
           echo "Extracted hardware: '$HARDWARE_RAW'"
-          echo "Hardware label: '$HARDWARE_LABEL'"
+          echo "Hardware label: '$HARDWARE_LABELS'"
           
-          echo "HARDWARE_LABEL=$HARDWARE_LABEL" >> "$GITHUB_ENV"
+          echo "HARDWARE_LABELS=$HARDWARE_LABELS" >> "$GITHUB_ENV"
 
       - name: Add hardware label to issue
         if: env.HARDWARE_LABEL != ''
