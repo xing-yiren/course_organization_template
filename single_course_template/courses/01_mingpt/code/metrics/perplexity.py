@@ -1,5 +1,4 @@
 import math
-import mindspore as ms
 import mindspore.mint as mint
 from mindspore.dataset import GeneratorDataset
 
@@ -30,3 +29,4 @@ def evaluate_model(model, val_dataset, block_size=256, batch_size=8):
     avg_loss = total_loss / count if count > 0 else 1e9
     ppl = math.exp(avg_loss)
     return avg_loss, ppl
+    
