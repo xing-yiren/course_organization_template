@@ -6,8 +6,8 @@
 import time
 from collections import defaultdict
 import mindspore
-from mindspore import amp
-from mindspore import ops
+# from mindspore import amp
+# from mindspore import ops
 from mindspore import mint
 from mindspore.dataset import GeneratorDataset, RandomSampler
 from mindspore.ops import clip_by_norm
