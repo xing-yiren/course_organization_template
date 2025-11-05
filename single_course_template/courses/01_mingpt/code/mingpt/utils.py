@@ -5,7 +5,6 @@ import random
 from ast import literal_eval
 import numpy as np
 import mindspore
-import mindspore.nn as nn
 
 def set_seed(seed):
     random.seed(seed)
@@ -95,7 +94,7 @@ class CfgNode:
 # 1.新加的：
 # Part1：计算参数
 try:
-    from lora_inject import LoRADense
+    from .lora_inject import LoRADense
 except:
     LoRADense = None
 
@@ -129,3 +128,4 @@ def print_param_report(title, model):
     print(f"\n[{title}]")
     print(f"Total params        : {total:,}")
     print(f"Trainable params    : {trainable:,} ({pct:.2f}%)")
+    
