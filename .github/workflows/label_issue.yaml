@@ -29,7 +29,7 @@ jobs:
           echo "HARDWARE_LABELS=$HARDWARE_LABELS" >> "$GITHUB_ENV"
 
       - name: Add hardware label to issue
-        if: env.HARDWARE_LABEL != ''
+        if: env.HARDWARE_LABELS != ''
         uses: actions-ecosystem/action-add-labels@v1
         with:
-          labels: ${{ env.HARDWARE_LABEL }}
+          labels: ${{ env.HARDWARE_LABELS }}
