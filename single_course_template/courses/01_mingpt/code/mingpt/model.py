@@ -1,9 +1,9 @@
 import math
 import mindspore as ms
-import mindspore.nn as nn
-import mindspore.mint as mint
+from mindspore import nn
+from mindspore import mint
 from mindspore.common.initializer import initializer, Normal, Zero, One
-from mingpt.utils import CfgNode as CN
+from .utils import CfgNode as CN
 
 
 # 基于mindspore.ops手动实现softmax(香橙派不支持nn.Softmax反向传播)
