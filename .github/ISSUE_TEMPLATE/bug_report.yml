@@ -60,10 +60,10 @@ body:
     description: Which hardware type does this bug relate to?
     options:
       - label: Ascend
-        value: ascend
       - label: GPU
-        value: gpu
       - label: CPU
-        value: cpu
   validations: 
     required: true
+- type: hidden
+  attributes:
+    value: ${{ steps.hardware.outputs.value | lower }}
