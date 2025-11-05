@@ -53,14 +53,18 @@ body:
     placeholder: "Ubuntu 20.04"
   validations:
     required: true
-- type: dropdown
+- type: checkboxes
   id: hardware
   attributes:
     label: Hardware Environment
-    description: Which hardware type does this bug relate to?
+    description: Which hardware type does this bug relate to (select all that apply)?
     options:
-      - Ascend
-      - GPU
-      - CPU
+      - label: Ascend
+      - label: GPU
+      - label: CPU
   validations: 
     required: true
+- type: textarea
+  attributes:
+    label: Additional Context
+    description: Any other details.

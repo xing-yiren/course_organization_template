@@ -17,17 +17,11 @@ jobs:
           
           HARDWARE_RAW=$(echo "$ISSUE_BODY" | awk '
             /^### Hardware Environment/ { flag=1; next }
-            flag==1 {
-              if ($0 != "") {
-                print $0; 
-                exit
-              }
-            }
+            flag==1 && /^###/ { flag=0 }  # 遇到下一个标题则停止
+            flag==1 { print $0 }  # 输出标题下的所有内容
           ')
           
-          HARDWARE_RAW=$(echo "$HARDWARE_RAW" | xargs)
-          
-          HARDWARE_LABEL=$(echo "$HARDWARE_RAW" | tr '[:upper:]' '[:lower:]')
+          HARDWARE_LABELS=$(echo "$HARDWARE_RAW" | grep -oP '\[x\] \K.*' | tr '[:upper:]' '[:lower:]' | tr '\n' ',' | sed 's/,$//')
           
           echo "Extracted hardware: '$HARDWARE_RAW'"
           echo "Hardware label: '$HARDWARE_LABEL'"
