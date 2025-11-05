@@ -56,9 +56,9 @@ from .utils import CfgNode as CN
 #         counter = ((self.counter + 1) % self.scale_window) * grads_finite
 
 #         ops.assign(self.counter, counter)
-        
+
 #         return True
-        
+
 
 class Trainer:
 
@@ -87,7 +87,7 @@ class Trainer:
         self.iter_num = 0
         self.iter_time = 0.0
         self.iter_dt = 0.0
-        
+
         # 修改点2
         # 新加的
         self.loss = None
@@ -118,7 +118,7 @@ class Trainer:
         )
 
         train_loader = train_loader.batch(config.batch_size, drop_remainder=True)
-        
+
         # 修改点3
         # # 香橙派训练必须使用设置O2模式的混合精度
         # model = amp.auto_mixed_precision(model, 'O2')
@@ -126,12 +126,12 @@ class Trainer:
         self.iter_num = 0
         self.iter_time = time.time()
         data_iter = iter(train_loader)
-        
+
         # # 修改点4
         # # 动态调整损失缩放，具体信息请参考
         # # https://www.mindspore.cn/docs/zh-CN/r2.6.0/api_python/amp/mindspore.amp.DynamicLossScaler.html?highlight=dynamicloss#mindspore.amp.DynamicLossScaler
         # loss_scaler = CustomDynamicLossScaler(scale_value=2**16, scale_factor=2, scale_window=50)
-            
+
         def net_forward(x, y):
             logits = model(x)
             logits = logits.float()
@@ -140,12 +140,12 @@ class Trainer:
                 y.view(-1), 
                 ignore_index=-1
             )
-            
+
             # 修改点5
             # # 动态调整loss值
             # return loss_scaler.scale(loss)
             return loss
-    
+
         grad_fn = mindspore.value_and_grad(net_forward, None, self.optimizer.parameters)
 
         while True:
@@ -156,15 +156,15 @@ class Trainer:
                 data_iter = iter(train_loader)
                 batch = next(data_iter)
             x, y = batch
-            
+
             # 前向+后向
             loss, grads = grad_fn(x, y)
-            
+
             # 修改点6
             # # 把放大后的loss缩小回原始数值
             # self.loss = loss_scaler.unscale(loss)
             self.loss = loss
-            
+
             # 修改点7
             # # 判断是否有溢出
             # is_finite = amp.all_finite(grads)
@@ -176,7 +176,7 @@ class Trainer:
             # 梯度裁剪与优化步
             grads = clip_by_norm(grads, config.grad_norm_clip)
             self.optimizer(grads)
-            
+
             # 修改点8
             # # 动态调整LossScaler数值
             # loss_scaler.adjust(is_finite)
