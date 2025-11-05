@@ -243,7 +243,7 @@ class GPT(nn.Cell):
                     no_decay.add(fpn)
 
         # 确认已经处理了每一个参数
-        param_dict = {pn: p for pn, p in self.parameters_and_names()}
+        param_dict = dict(self.parameters_and_names())
         inter_params = decay & no_decay
         union_params = decay | no_decay
         assert (
