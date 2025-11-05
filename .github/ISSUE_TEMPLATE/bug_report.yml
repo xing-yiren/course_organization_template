@@ -49,13 +49,6 @@ body:
 - type: input
   attributes:
     label: OS Platform
-    description: Which operating system are you using? (e.g., 3.9.7)
-    placeholder: "3.9.7"
-  validations:
-    required: true
-- type: input
-  attributes:
-    label: OS Platform
     description: Which operating system are you using? (e.g., Ubuntu 20.04)
     placeholder: "Ubuntu 20.04"
   validations:
@@ -72,4 +65,5 @@ body:
         value: gpu
       - label: CPU
         value: cpu
-    validations: true
+    validations: 
+      required: true
