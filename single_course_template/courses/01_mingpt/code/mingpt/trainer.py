@@ -190,4 +190,3 @@ class Trainer:
             # 终止条件
             if config.max_iters is not None and self.iter_num >= config.max_iters:
                 break
-
