@@ -64,6 +64,3 @@ body:
       - label: CPU
   validations: 
     required: true
-- type: hidden
-  attributes:
-    value: ${{ steps.hardware.outputs.value | lower }}
