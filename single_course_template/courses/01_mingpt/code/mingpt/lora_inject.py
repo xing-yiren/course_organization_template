@@ -58,7 +58,8 @@ def inject_lora_into_gpt(model, r=8, alpha=16.0, dropout=0.0,
 def mark_only_lora_as_trainable(model, allow=()):
     """只训练.lora_参数"""
     for n, p in model.parameters_and_names():
-        if p is None: continue
+        if p is None:
+            continue
         p.requires_grad = (".lora_" in n) or any(k in n for k in allow)
 
 def attach_lora_optimizer(model):
@@ -74,4 +75,3 @@ def attach_lora_optimizer(model):
             beta1=cfg.betas[0], beta2=cfg.betas[1], eps=1e-8
         )
     model.configure_optimizers = types.MethodType(_configure_optimizers_lora, model)
-    
