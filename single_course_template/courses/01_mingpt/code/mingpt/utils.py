@@ -128,4 +128,3 @@ def print_param_report(title, model):
     print(f"\n[{title}]")
     print(f"Total params        : {total:,}")
     print(f"Trainable params    : {trainable:,} ({pct:.2f}%)")
-    
