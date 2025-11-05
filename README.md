@@ -71,7 +71,6 @@
 
 </table>
 
-
 ## Quick Access to MindSpore
 
 <div align=center>
@@ -87,6 +86,7 @@
 </div>
 
 ## Join the Community
+
 <div align="center">
 
 | <img alt="wechat-assistant" src="./images/wechat_assistant.png" width="200px">| <img alt="qq-group-chat" src="./images/qq_group_chat.png" width="200px"> |

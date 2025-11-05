@@ -7,7 +7,6 @@
 
 ## 📢 最新消息
 
-
 - 「教材教辅」与哈尔滨工业大学苏统华老师共建的《人工智能：原理与应用》数字教材已正式出版，欢迎开发者在线学习！（[查看详情](https://e.huawei.com/cn/talent/outPage/#/sxz-course/home?courseId=K--4yKm9T9VTCjwXOw5VyL66JpI)）
 - 「比赛」昇思模型开发挑战赛S1赛季火热进行中，20万奖金池，欢迎感兴趣的开发者报名参与！（[查看详情](https://www.hiascend.com/developer/contests/details/21ffd6733ab54dc4b6b686a242c5d586?module=0d9953a460e14a70be89dd6f3637f487)）
 - 「应用案例」昇思创新训练营优秀实践项目持续更新中，欢迎开发者前来关注！
@@ -66,7 +65,6 @@
     </tr>
 
 </table>
-
 
 ## 加入我们
 
