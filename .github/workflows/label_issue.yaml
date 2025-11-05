@@ -10,9 +10,13 @@ jobs:
       - name: Get hardware selection
         id: get_hardware
         run: |
-          HARDWARE_RAW=$(jq -r '.issue.body | fromjson | .hardware' "$GITHUB_EVENT_PATH")
-          HARDWARE_LOWER=$(echo "$HARDWARE_RAW" | tr '[:upper:]' '[:lower:]')
-          echo "HARDWARE_LABEL=$HARDWARE_LOWER" >> "$GITHUB_ENV"
+          ISSUE_NUMBER=${{ github.event.issue.number }}
+          RESPONSE=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            "https://api.github.com/repos/${{ github.repository }}/issues/$ISSUE_NUMBER")
+          FORM_DATA=$(echo "$RESPONSE" | jq -r '.body')
+          HARDWARE_RAW=$(echo "$FORM_DATA" | jq -r '.hardware')
+          HARDWARE_LABEL=$(echo "$HARDWARE_RAW" | tr '[:upper:]' '[:lower:]')
+          echo "HARDWARE_LABEL=$HARDWARE_LABEL" >> "$GITHUB_ENV"
 
       - name: Add hardware label to issue
         uses: actions-ecosystem/action-add-labels@v1
