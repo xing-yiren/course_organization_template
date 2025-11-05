@@ -35,3 +35,4 @@ def eval_rouge(model, val_ids, tok, samples=5, ctx=64, gen=64, stride=256):
         return 0.0, 0.0, 0.0
     arr = np.array(res, dtype=np.float32)
     return float(arr[:,0].mean()), float(arr[:,1].mean()), float(arr[:,2].mean())
+    
