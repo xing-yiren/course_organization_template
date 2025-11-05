@@ -32,6 +32,17 @@ body:
       A placeholder for the command.
   validations:
     required: true
+- type: checkboxes
+  id: hardware
+  attributes:
+    label: Hardware Environment
+    description: Which hardware type does this bug relate to (select all that apply)?
+    options:
+      - label: Ascend
+      - label: GPU
+      - label: CPU
+  validations: 
+    required: true
 - type: input
   attributes:
     label: MindSpore Version
@@ -52,17 +63,6 @@ body:
     description: Which operating system are you using? (e.g., Ubuntu 20.04)
     placeholder: "Ubuntu 20.04"
   validations:
-    required: true
-- type: checkboxes
-  id: hardware
-  attributes:
-    label: Hardware Environment
-    description: Which hardware type does this bug relate to (select all that apply)?
-    options:
-      - label: Ascend
-      - label: GPU
-      - label: CPU
-  validations: 
     required: true
 - type: textarea
   attributes:
