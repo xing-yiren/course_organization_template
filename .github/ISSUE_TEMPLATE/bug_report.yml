@@ -20,7 +20,7 @@ body:
       A clear and concise description of what the bug is, including:
         - What happened (actual behavior)
         - What you expected (expected outcome)
-        - **Please attach error logs (using code blocks: ```python ... ```) or screenshots if possible**—this helps us locate the issue faster.
+        - **Please attach error logs or screenshots if possible**—this helps us locate the issue faster.
   validations:
     required: true
 - type: textarea
