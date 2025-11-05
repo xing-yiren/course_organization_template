@@ -9,7 +9,7 @@ import mindspore
 from mindspore import amp, ops, mint
 from mindspore.dataset import GeneratorDataset, RandomSampler
 from mindspore.ops import clip_by_norm
-from mingpt.utils import CfgNode as CN
+from .utils import CfgNode as CN
 
 # 修改点1
 # # 香橙派上没有ops.select方法的算子，需要手动实现后继承amp.DynamicLossScaler，对其adjust方法进行修改
@@ -188,3 +188,4 @@ class Trainer:
             # 终止条件
             if config.max_iters is not None and self.iter_num >= config.max_iters:
                 break
+                    
