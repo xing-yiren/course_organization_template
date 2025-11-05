@@ -59,8 +59,8 @@ body:
     label: Hardware Environment
     description: Which hardware type does this bug relate to?
     options:
-      - label: Ascend
-      - label: GPU
-      - label: CPU
+      - Ascend
+      - GPU
+      - CPU
   validations: 
     required: true
