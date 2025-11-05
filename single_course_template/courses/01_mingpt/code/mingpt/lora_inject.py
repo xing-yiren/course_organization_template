@@ -1,7 +1,8 @@
-import itertools, types
+import itertools
+import types
 import mindspore as ms
-import mindspore.nn as nn
-import mindspore.mint as mint
+from mindspore import nn
+from mindspore import mint
 from mindspore.common.initializer import initializer, Normal
 
 _UID = itertools.count()
@@ -73,3 +74,4 @@ def attach_lora_optimizer(model):
             beta1=cfg.betas[0], beta2=cfg.betas[1], eps=1e-8
         )
     model.configure_optimizers = types.MethodType(_configure_optimizers_lora, model)
+    
