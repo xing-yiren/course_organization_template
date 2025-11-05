@@ -65,5 +65,5 @@ body:
         value: gpu
       - label: CPU
         value: cpu
-    validations: 
-      required: true
+  validations: 
+    required: true
