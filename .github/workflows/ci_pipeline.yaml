@@ -16,7 +16,7 @@ on:
 # A workflow run is made up of one or more jobs that can run sequentially or in parallel
 jobs:
   pylint-check:
-    name: Run Pylint
+    name: Pylint Check
     runs-on: ubuntu-latest
 
     steps:
@@ -38,3 +38,17 @@ jobs:
         NUM_CORES=$(nproc)
         export PYTHONPATH=$PYTHONPATH:$(pwd)/single_course_template/courses
         pylint single_course_template/courses/*/code --jobs=$NUM_CORES --rcfile=.github/pylint.conf
+  
+  markdownlint-check:
+    name: Markdownlint Check
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+      
+      - name: Run markdownlint
+        uses: DavidAnson/markdownlint-cli2-action@v15
+        with:
+          globs: "**/*.md"
+          config: '.github/.markdownlint.json'

@@ -1,6 +1,6 @@
 import math
 import mindspore as ms
-import mindspore.mint as mint
+from mindspore import mint
 from mindspore.dataset import GeneratorDataset
 
 def evaluate_model(model, val_dataset, block_size=256, batch_size=8):
