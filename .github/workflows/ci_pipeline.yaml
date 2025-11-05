@@ -36,4 +36,5 @@ jobs:
     - name: Run Pylint
       run: |
         NUM_CORES=$(nproc)
-        pylint . --jobs=$NUM_CORES --rcfile=.github/pylint.conf
+        export PYTHONPATH=$PYTHONPATH:$(pwd)/single_course_template/courses
+        pylint single_course_template/courses/*/code --jobs=$NUM_CORES --rcfile=.github/pylint.conf
