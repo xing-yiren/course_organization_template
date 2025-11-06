@@ -26,16 +26,51 @@ jobs:
           echo "Extracted label list: "
           cat hardware_labels.txt
 
-      - name: Add each hardware label individually
+      - name: Get current labels on the issue
+        id: get_current
+        run: |
+          CURRENT_LABELS=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            "https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.issue.number }}/labels" | jq -r '.[].name')
+          
+          echo "$CURRENT_LABELS" | grep -E '^(ascend|gpu|cpu)$' > current_labels.txt
+          
+          echo "Current label list: "
+          cat current_labels.txt
+
+      - name: Calculate labels to add/remove
+        id: calc_diff
+        run: |
+          comm -23 <(sort target_labels.txt) <(sort current_labels.txt) > add_labels.txt
+
+          comm -13 <(sort target_labels.txt) <(sort current_labels.txt) > remove_labels.txt
+
+          echo "Labels to add: "
+          cat add_labels.txt
+          echo "Labels to remove"
+          cat remove_labels.txt
+
+      - name: Add missing labels
         run: |
           while IFS= read -r label; do
             if [ -n "$label" ]; then
-              echo "添加标签: $label"
-              # 调用 GitHub API 逐个添加标签（避免插件格式问题）
+              echo "Add label: $label"
               curl -X POST \
                 -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
                 -H "Accept: application/vnd.github.v3+json" \
                 "https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.issue.number }}/labels" \
                 -d "[\"$label\"]"
             fi
-          done < hardware_labels.txt
+          done < add_labels.txt
+
+      - name: Remove extra labels
+        run: |
+          while IFS= read -r label; do
+            if [ -n "$label" ]; then
+              echo "Remove label: $label"
+              curl -X DELETE \
+                -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+                -H "Accept: application/vnd.github.v3+json" \
+                "https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.issue.number }}/labels/$label"
+            fi
+          done < remove_labels.txt
+
