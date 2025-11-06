@@ -21,15 +21,15 @@ jobs:
             flag==1 { print $0 }  # 输出标题下的所有内容
           ')
           
-          HARDWARE_LABELS=$(echo "$HARDWARE_RAW" | grep -oP '\[x\] \K.*' | tr '[:upper:]' '[:lower:]' | tr '\n' ' ' | sed 's/ $//')
+          echo "$HARDWARE_RAW" | grep -oP '\[x\] \K.*' | tr '[:upper:]' '[:lower:]' > hardware_labels.txt
           
-          echo "Extracted hardware: '$HARDWARE_RAW'"
-          echo "Hardware label: '$HARDWARE_LABELS'"
+          HARDWARE_JSON=$(jq -R . hardware_labels.txt | jq -s .)
           
-          echo "HARDWARE_LABELS=$HARDWARE_LABELS" >> "$GITHUB_ENV"
+          echo "提取的硬件标签 JSON: $HARDWARE_JSON"
+          echo "HARDWARE_JSON=$HARDWARE_JSON" >> "$GITHUB_ENV"
 
-      - name: Add hardware label to issue
-        if: env.HARDWARE_LABELS != ''
+      - name: Add multiple hardware labels
+        if: env.HARDWARE_JSON != '[]'
         uses: actions-ecosystem/action-add-labels@v1
         with:
-          labels: ${{ env.HARDWARE_LABELS }}
+          labels: ${{ fromJSON(env.HARDWARE_JSON) }}
