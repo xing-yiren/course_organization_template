@@ -21,10 +21,10 @@ jobs:
             flag==1 { print $0 }
           ')
           
-          echo "$HARDWARE_RAW" | grep -oP '\[x\] \K.*' | tr '[:upper:]' '[:lower:]' | sed '/^$/d' > hardware_labels.txt
+          echo "$HARDWARE_RAW" | grep -oP '\[x\] \K.*' | tr '[:upper:]' '[:lower:]' | sed '/^$/d' > target_labels.txt
           
           echo "Extracted label list: "
-          cat hardware_labels.txt
+          cat target_labels.txt
 
       - name: Get current labels on the issue
         id: get_current
@@ -73,4 +73,3 @@ jobs:
                 "https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.issue.number }}/labels/$label"
             fi
           done < remove_labels.txt
-
