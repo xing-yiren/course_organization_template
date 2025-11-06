@@ -30,46 +30,59 @@ jobs:
         id: get_current
         run: |
           CURRENT_LABELS=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-            "https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.issue.number }}/labels" | jq -r '.[].name')
+            "https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.issue.number }}/labels" | jq -r '.[].name // empty')
           
           echo "$CURRENT_LABELS" | grep -E '^(ascend|gpu|cpu)$' > current_labels.txt
-          
+
+          touch current_labels.txt
+
           echo "Current label list: "
           cat current_labels.txt
 
       - name: Calculate labels to add/remove
         id: calc_diff
         run: |
-          comm -23 <(sort target_labels.txt) <(sort current_labels.txt) > add_labels.txt
+          sort target_labels.txt > target_sorted.txt
+          sort current_labels.txt > current_sorted.txt
+          
+          comm -23 target_sorted.txt current_sorted.txt > add_labels.txt
 
-          comm -13 <(sort target_labels.txt) <(sort current_labels.txt) > remove_labels.txt
+          comm -13 target_sorted.txt current_sorted.txt > remove_labels.txt
 
           echo "Labels to add: "
           cat add_labels.txt
-          echo "Labels to remove"
+          echo "Labels to remove: "
           cat remove_labels.txt
 
       - name: Add missing labels
         run: |
-          while IFS= read -r label; do
-            if [ -n "$label" ]; then
-              echo "Add label: $label"
-              curl -X POST \
-                -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-                -H "Accept: application/vnd.github.v3+json" \
-                "https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.issue.number }}/labels" \
-                -d "[\"$label\"]"
-            fi
-          done < add_labels.txt
+          if [ -s add_labels.txt ]; then
+            while IFS= read -r label; do
+              if [ -n "$label" ]; then
+                echo "Add label: $label"
+                curl -X POST \
+                  -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+                  -H "Accept: application/vnd.github.v3+json" \
+                  "https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.issue.number }}/labels" \
+                  -d "[\"$label\"]"
+              fi
+            done < add_labels.txt
+          else
+            echo "No labels to add."
+          fi
 
       - name: Remove extra labels
         run: |
-          while IFS= read -r label; do
-            if [ -n "$label" ]; then
-              echo "Remove label: $label"
-              curl -X DELETE \
-                -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-                -H "Accept: application/vnd.github.v3+json" \
-                "https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.issue.number }}/labels/$label"
-            fi
-          done < remove_labels.txt
+          if [ -s remove_labels.txt ]; then
+            while IFS= read -r label; do
+              if [ -n "$label" ]; then
+                echo "Remove label: $label"
+                curl -X DELETE \
+                  -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+                  -H "Accept: application/vnd.github.v3+json" \
+                  "https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.issue.number }}/labels/$label"
+              fi
+            done < remove_labels.txt
+          else
+            echo "No labels to remove."
+          fi
