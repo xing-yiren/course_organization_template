@@ -26,9 +26,11 @@
     3. 构建完成后，通过以下命令查看镜像：
 
         ```bash
-        docker images | grep [镜像名称]  
+        docker images | grep [镜像名称]
         ```
+
         若输出类似以下内容，说明构建成功：
+
         ```text
         [镜像名称]   [镜像标签]     abc12345   2 minutes ago   XXGB  
         ```
@@ -44,7 +46,7 @@
         ```bash
         docker ps
         ```
-    
+
         若输出类似以下内容，说明启动成功：
 
         ```text
@@ -79,7 +81,7 @@
         ```
 
         若输出类似以下内容，说明构建成功：
-    
+
         ```text
         [镜像名称]   [镜像标签]     abc12345   2 minutes ago   XXGB
         ```

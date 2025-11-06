@@ -1,5 +1,4 @@
 import math
-import mindspore as ms
 from mindspore import mint
 from mindspore.dataset import GeneratorDataset
 
