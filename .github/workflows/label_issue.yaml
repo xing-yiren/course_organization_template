@@ -23,10 +23,19 @@ jobs:
           
           echo "$HARDWARE_RAW" | grep -oP '\[x\] \K.*' | tr '[:upper:]' '[:lower:]' > hardware_labels.txt
           
-          HARDWARE_JSON=$(jq -R . hardware_labels.txt | jq -s .)
+          HARDWARE_LABELS=$(echo "$HARDWARE_RAW" | grep -oP '\[x\] \K.*' | tr '[:upper:]' '[:lower:]' | sed '/^$/d')
           
-          echo "提取的硬件标签 JSON: $HARDWARE_JSON"
-          echo "HARDWARE_JSON=$HARDWARE_JSON" >> "$GITHUB_ENV"
+          if [ -n "$HARDWARE_LABELS" ]; then
+            HARDWARE_JSON=$(echo "$HARDWARE_LABELS" | jq -R . | jq -s 'map(select(length > 0))')
+          else
+            HARDWARE_JSON="[]"
+          fi
+          
+          HARDWARE_JSON=$(echo "$HARDWARE_JSON" | tr -d '[:space:]' | sed 's/","/","/g')
+
+          echo "JSON output: $HARDWARE_JSON"
+          
+          printf "HARDWARE_JSON=%s" "$HARDWARE_JSON" >> "$GITHUB_ENV"
 
       - name: Add multiple hardware labels
         if: env.HARDWARE_JSON != '[]'
