@@ -17,28 +17,25 @@ jobs:
           
           HARDWARE_RAW=$(echo "$ISSUE_BODY" | awk '
             /^### Hardware Environment/ { flag=1; next }
-            flag==1 && /^###/ { flag=0 }  # 遇到下一个标题则停止
-            flag==1 { print $0 }  # 输出标题下的所有内容
+            flag==1 && /^###/ { flag=0 }
+            flag==1 { print $0 }
           ')
           
-          echo "$HARDWARE_RAW" | grep -oP '\[x\] \K.*' | tr '[:upper:]' '[:lower:]' > hardware_labels.txt
+          echo "$HARDWARE_RAW" | grep -oP '\[x\] \K.*' | tr '[:upper:]' '[:lower:]' | sed '/^$/d' > hardware_labels.txt
           
-          HARDWARE_LABELS=$(echo "$HARDWARE_RAW" | grep -oP '\[x\] \K.*' | tr '[:upper:]' '[:lower:]' | sed '/^$/d')
-          
-          if [ -n "$HARDWARE_LABELS" ]; then
-            HARDWARE_JSON=$(echo "$HARDWARE_LABELS" | jq -R . | jq -s 'map(select(length > 0))')
-          else
-            HARDWARE_JSON="[]"
-          fi
-          
-          HARDWARE_JSON=$(echo "$HARDWARE_JSON" | tr -d '[:space:]' | sed 's/","/","/g')
+          echo "Extracted label list: "
+          cat hardware_labels.txt
 
-          echo "JSON output: $HARDWARE_JSON"
-          
-          printf "HARDWARE_JSON=%s" "$HARDWARE_JSON" >> "$GITHUB_ENV"
-
-      - name: Add multiple hardware labels
-        if: env.HARDWARE_JSON != '[]'
-        uses: actions-ecosystem/action-add-labels@v1
-        with:
-          labels: ${{ fromJSON(env.HARDWARE_JSON) }}
+      - name: Add each hardware label individually
+        run: |
+          while IFS= read -r label; do
+            if [ -n "$label" ]; then
+              echo "添加标签: $label"
+              # 调用 GitHub API 逐个添加标签（避免插件格式问题）
+              curl -X POST \
+                -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+                -H "Accept: application/vnd.github.v3+json" \
+                "https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.issue.number }}/labels" \
+                -d "[\"$label\"]"
+            fi
+          done < hardware_labels.txt
