@@ -21,18 +21,22 @@ jobs:
             flag==1 { print $0 }
           ')
           
-          echo "$HARDWARE_RAW" | grep -oP '\[x\] \K.*' | tr '[:upper:]' '[:lower:]' | sed '/^$/d' > target_labels.txt
+          echo "$HARDWARE_RAW" | grep -oP '\[x\] \K.*' | tr '[:upper:]' '[:lower:]' | sed '/^$/d' > target_labels.txt || true
           
-          echo "Extracted label list: "
+          touch target_labels.txt
+          
+          echo "Target lables: "
           cat target_labels.txt
 
       - name: Get current labels on the issue
         id: get_current
         run: |
-          CURRENT_LABELS=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-            "https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.issue.number }}/labels" | jq -r '.[].name // empty')
+          set -euo pipefail
           
-          echo "$CURRENT_LABELS" | grep -E '^(ascend|gpu|cpu)$' > current_labels.txt
+          CURRENT_LABELS=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            "https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.issue.number }}/labels" || echo "[]")
+          
+          echo "$CURRENT_LABELS" | jq -r '.[].name // empty' | grep -E '^(ascend|gpu|cpu)$' > current_labels.txt || true
 
           touch current_labels.txt
 
