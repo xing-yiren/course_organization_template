@@ -52,3 +52,44 @@ jobs:
         with:
           globs: "**/*.md"
           config: '.github/.markdownlint.json'
+  
+  ipynb-lint-check:
+    name: Jupyter Notebook Lint Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip==24.0
+          if [ -f "requirements.txt" ]; then pip install -r requirements.txt; fi
+
+
+      - name: Extract Markdown from .ipynb files
+        run: |
+          mkdir -p temp_md
+          find . -name "*.ipynb" | while read -r nb; do
+            jq -r '.cells[] | select(.cell_type == "markdown") | .source | join("\n")' "$nb" > "temp_md/$(basename "$nb").md"
+          done
+
+      - name: Run markdownlint (for .ipynb)
+        uses: DavidAnson/markdownlint-cli2-action@v15
+        with:
+          globs: "temp_md/*.md"
+          config: '.github/.markdownlint.json'
+      
+      - name: Run Pylint (for .ipynb)
+        run: |
+          NUM_CORES=$(nproc)
+          export PYTHONPATH=$PYTHONPATH:$(pwd)/single_course_template/courses
+          nbqa pylint single_course_template/courses/*/code --jobs=$NUM_CORES --rcfile=.github/pylint.conf
+
+      - name: Cleanup temporary files
+        if: always()
+        run: rm -rf temp_md
