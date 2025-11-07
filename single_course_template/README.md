@@ -1,6 +1,6 @@
 <div align=center>
   <h1>Course Title</h1>
-  <p><a href="./README.md">查看中文</a></p>
+  <p><a href="./README_ZH.md">查看中文</a></p>
 </div>
 
 Brief introduction to repository.
