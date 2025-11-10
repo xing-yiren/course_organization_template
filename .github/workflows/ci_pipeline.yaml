@@ -33,12 +33,19 @@ jobs:
         python -m pip install --upgrade pip==24.0
         if [ -f "requirements.txt" ]; then pip install -r requirements.txt; fi
 
-    - name: Run Pylint
+    - name: Run Pylint (for .py)
       run: |
         NUM_CORES=$(nproc)
         export PYTHONPATH=$PYTHONPATH:$(pwd)/single_course_template/courses
         pylint single_course_template/courses/*/code --jobs=$NUM_CORES --rcfile=.github/pylint.conf
-  
+
+    - name: Run Pylint (for .ipynb)
+      run: |
+        NUM_CORES=$(nproc)
+        export PYTHONPATH=$PYTHONPATH:$(pwd)/single_course_template/courses
+        nbqa pylint single_course_template/courses/*/code --jobs=$NUM_CORES --rcfile=.github/pylint.conf
+
+
   markdownlint-check:
     name: Markdownlint Check
     runs-on: ubuntu-latest
@@ -47,49 +54,26 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
       
+      - name: Extract Markdown from .ipynb files
+        run: |
+          mkdir -p temp_md  # 创建临时目录存储提取的 Markdown
+          # 递归查找所有 .ipynb 文件，按规则提取内容
+          find . -name "*.ipynb" | while IFS= read -r nb; do
+            # 生成临时 .md 文件路径（镜像原始目录结构，避免重名）
+            nb_relpath=$(realpath --relative-to=. "$nb")
+            temp_md_path="temp_md/${nb_relpath%.ipynb}.md"
+            # 创建临时文件所在的目录（支持多级子目录）
+            mkdir -p "$(dirname "$temp_md_path")"
+            # 使用确认的 jq 命令提取内容：单元格内元素直接拼接，单元格间空行分隔
+            jq -r '
+              .cells 
+              | map(select(.cell_type == "markdown") | .source | join("")) 
+              | join("\n\n")
+            ' "$nb" > "$temp_md_path"
+          done
+      
       - name: Run markdownlint
         uses: DavidAnson/markdownlint-cli2-action@v15
         with:
           globs: "**/*.md"
           config: '.github/.markdownlint.json'
-  
-  ipynb-lint-check:
-    name: Jupyter Notebook Lint Check
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip==24.0
-          if [ -f "requirements.txt" ]; then pip install -r requirements.txt; fi
-
-
-      - name: Extract Markdown from .ipynb files
-        run: |
-          mkdir -p temp_md
-          find . -name "*.ipynb" | while read -r nb; do
-            jq -r '.cells[] | select(.cell_type == "markdown") | .source | join("\n")' "$nb" > "temp_md/$(basename "$nb").md"
-          done
-
-      - name: Run markdownlint (for .ipynb)
-        uses: DavidAnson/markdownlint-cli2-action@v15
-        with:
-          globs: "temp_md/*.md"
-          config: '.github/.markdownlint.json'
-      
-      - name: Run Pylint (for .ipynb)
-        run: |
-          NUM_CORES=$(nproc)
-          export PYTHONPATH=$PYTHONPATH:$(pwd)/single_course_template/courses
-          nbqa pylint single_course_template/courses/*/code --jobs=$NUM_CORES --rcfile=.github/pylint.conf
-
-      - name: Cleanup temporary files
-        if: always()
-        run: rm -rf temp_md
