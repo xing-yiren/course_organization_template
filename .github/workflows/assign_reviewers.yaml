@@ -1,0 +1,46 @@
+name: Auto Assign Reviewers
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize]
+
+jobs:
+  assign-reviewers:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get CODEOWNERS reviewers
+        id: get-reviewers
+        uses: edgonmsft/action-codeowners@v1
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          pr-number: ${{ github.event.pull_request.number }}
+
+      - name: Assign reviewers to PR
+        if: steps.get-reviewers.outputs.reviewers != ''
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const reviewers = [...new Set('${{ steps.get-reviewers.outputs.reviewers }}'.split(','))];
+            console.log('Assigning reviewers:', reviewers);
+
+            // Add reviewers to PR
+            await github.rest.pulls.requestReviewers({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.issue.number,
+              reviewers: reviewers
+            });
+
+            // @reviewers in conversation
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: `This PR requires review, please @${reviewers.join(' @')} take a look~`
+            });
