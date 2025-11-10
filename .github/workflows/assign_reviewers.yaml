@@ -5,39 +5,69 @@ on:
     types: [opened, edited, synchronize]
 
 jobs:
-  assign-reviewers:
+  get-reviewers:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
-      - name: Get CODEOWNERS reviewers
-        id: get-reviewers
-        uses: edgonmsft/action-codeowners@v1
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          pr-number: ${{ github.event.pull_request.number }}
-
-      - name: Assign reviewers to PR
-        if: steps.get-reviewers.outputs.reviewers != ''
+      - name: Get modified files in PR
+        id: modified-files
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            const reviewers = [...new Set('${{ steps.get-reviewers.outputs.reviewers }}'.split(','))];
-            console.log('Assigning reviewers:', reviewers);
+            // Get list of modified files
+            const { data: files } = await github.rest.pulls.listFiles({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.issue.number,
+            });
+            // Extract file paths
+            const filePaths = files.map(f => f.filename).join('\n');
+            console.log('Modified files:\n', filePaths);
+            return filePaths;
 
-            // Add reviewers to PR
+      - name: Parse CODEOWNERS to find reviewers
+        id: codeowners-parser
+        run: |
+          codeowners=$(grep -v '^#\|^$' .github/CODEOWNERS)
+          
+          modified_files=$(echo "${{ steps.modified-files.outputs.result }}")
+
+          reviewers=()
+          while IFS= read -r file; do
+            while IFS= read -r rule; do
+              path=$(echo "$rule" | awk '{print $1}')
+              owners=$(echo "$rule" | awk '{$1=""; print $0}')
+              if [[ "$file" == $path || "$file" == ${path}* ]]; then
+                reviewers+=($owners)
+                break
+              fi
+            done <<< "$codeowners"
+          done <<< "$modified_files"
+
+          unique_reviewers=$(echo "${reviewers[@]}" | tr ' ' '\n' | sort -u | tr '\n' ',' | sed 's/,$//')
+          echo "reviewers=$unique_reviewers" >> $GITHUB_OUTPUT
+
+      - name: Assign reviewers and comment
+        if: steps.codeowners-parser.outputs.reviewers != ''
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const reviewers = '${{ steps.codeowners-parser.outputs.reviewers }}'.split(',');
+            console.log('Assigning reviewers:', reviewers);
+            
+            // Add reviewers
             await github.rest.pulls.requestReviewers({
               owner: context.repo.owner,
               repo: context.repo.repo,
               pull_number: context.issue.number,
               reviewers: reviewers
             });
-
-            // @reviewers in conversation
+            
+            // Comment to remind
             await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
