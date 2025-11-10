@@ -4,7 +4,7 @@
 / @xing-yiren
 
 # Files related to course 01_mingpt, reviewed by @teacher1
-/courses/01_mingpt/ @allendyu
+/single_course_template/courses/01_mingpt/ @allendyu
 
 # All .ipynb files (regardless of location), additionally reviewed by @
 *.ipynb @allendyu
