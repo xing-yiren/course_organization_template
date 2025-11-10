@@ -48,45 +48,53 @@ jobs:
           fi
 
           # Extract valid rules
-          codeowners=$(grep -v '^#\|^$' .github/CODEOWNERS)
-          
-          # Get list of modified files
+          codeowners=$(grep -v '^#\|^$' .github/CODEOWNERS | awk '{print length($1), $0}' | sort -nr | cut -d' ' -f2-)
           modified_files="${{ steps.modified-files.outputs.result }}"
           if [ -z "$modified_files" ]; then
-            echo "No modified files found in PR"
             echo "reviewers=" >> $GITHUB_OUTPUT
             exit 0
           fi
 
-          # Find reviewers
           declare -A reviewer_set
+          # Match reviewers to each file
           while IFS= read -r file; do
-            echo "Matching file: $file"
+            echo "Processing file: $file"
+            matched=0
             while IFS= read -r rule; do
               path=$(echo "$rule" | awk '{print $1}')
-              owners=$(echo "$rule" | cut -d' ' -f2-)
-              echo "Checking rule: path=$path, owners=$owners"
-
-              if [ "$path" = "/" ]; then
-                echo "Matched root rule: $file is under root"
-                for owner in $owners; do
-                  reviewer_set["$owner"]=1
-                done
-                break
-              fi
+              owners=$(echo "$rule" | cut -d' ' -f2- | sed 's/^@//g')
+              echo "Checking rule: $path → $owners"
 
               if [[ "$file" == $path ]]; then
-                echo "Matched: $file matches $path"
+                echo "Matched specific rule: $path"
                 for owner in $owners; do
-                  reviewer_set["$owner"]=1
+                  clean_owner=$(echo "$owner" | sed 's/^@//')
+                  reviewer_set["$clean_owner"]=1
                 done
+                matched=1
                 break
               fi
             done <<< "$codeowners"
+
+            if [ $matched -eq 0 ]; then
+              echo "No specific rule found, checking root rule"
+              while IFS= read -r rule; do
+                path=$(echo "$rule" | awk '{print $1}')
+                owners=$(echo "$rule" | cut -d' ' -f2- | sed 's/^@//g')
+                if [ "$path" = "/" ]; then
+                  echo "Applying root rule: $path"
+                  for owner in $owners; do
+                    clean_owner=$(echo "$owner" | sed 's/^@//')
+                    reviewer_set["$clean_owner"]=1
+                  done
+                  break
+                fi
+              done <<< "$codeowners"
+            fi
           done <<< "$modified_files"
 
-          # Extract reviewer list
-          unique_reviewers=$(echo "${!reviewer_set[@]}" | tr ' ' ',')
+          # Get reviewer list
+          unique_reviewers=$(echo "${!reviewer_set[@]}" | tr ' ' ',' | sed 's/^,//;s/,$//')
           echo "reviewers=$unique_reviewers" >> $GITHUB_OUTPUT
           echo "Found reviewers: $unique_reviewers"
 
@@ -107,6 +115,7 @@ jobs:
                 pull_number: context.issue.number,
                 reviewers: reviewers
               });
+              console.log('Reviewers assigned successfully');
 
               // Comment to remind
               const commentBody = `This PR requires review, please @${reviewers.join(' @')} take a look~`;
