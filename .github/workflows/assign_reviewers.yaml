@@ -46,52 +46,59 @@ jobs:
             exit 1
           fi
 
-          # Extract all rules
+          # Extract and normalize all rules (remove comments/empty lines, trim leading slashes)
           all_rules=$(grep -v '^#\|^$' .github/CODEOWNERS | awk '{path=$1; gsub(/^\//, "", path); $1=path; print $0}')
-
           modified_files="${{ steps.modified-files.outputs.result }}"
           [ -z "$modified_files" ] && { echo "reviewers=" >> $GITHUB_OUTPUT; exit 0; }
 
-          declare -A reviewer_set
+          declare -A global_reviewers  # Final unique reviewers across all files
 
-          # Process each modified file to find matching CODEOWNERS rules
+          # Process EACH file individually
           while IFS= read -r file; do
-            # Check all rules for the current file (allow multiple matches)
-            echo "Processing file: $file"
+            echo "=== Processing file: $file ==="
+            declare -A file_reviewers  # Reviewers specific to this file
+
+            # Check ALL rules against the current file
             while IFS= read -r rule; do
               path=$(echo "$rule" | awk '{print $1}')
               owners=$(echo "$rule" | cut -d' ' -f2- | sed 's/^@//g')
-              echo "Checking rule: $path → $owners"
+              echo "Checking rule: path='$path', owners='$owners'"
 
-              # Special handling for suffix wildcards (e.g., *.md, *.ipynb)
+              # Match suffix wildcards (e.g., *.md, *.ipynb)
               if [[ "$path" == *"*."* ]]; then
                 suffix="${path#*.}"
                 if [[ "$file" == *."$suffix" ]]; then
-                  echo "Matched suffix rule: $file ends with .$suffix"
+                  echo "✓ Matched suffix rule: $file ends with .$suffix"
                   for owner in $owners; do
                     clean_owner=$(echo "$owner" | sed 's/^@//')
-                    reviewer_set["$clean_owner"]=1
-                    echo "Added suffix reviewer: $clean_owner"
+                    file_reviewers["$clean_owner"]=1
                   done
                 fi
+              # Match path rules (directories or exact paths)
               else
-                # Handle path-based rules (directories or specific files)
                 if [[ "$file" == "$path" || "$file" == "${path}"* ]]; then
-                  echo "Matched path rule: $file → $path"
+                  echo "✓ Matched path rule: $file starts with $path"
                   for owner in $owners; do
                     clean_owner=$(echo "$owner" | sed 's/^@//')
-                    reviewer_set["$clean_owner"]=1
-                    echo "Added path reviewer: $clean_owner"
+                    file_reviewers["$clean_owner"]=1
                   done
                 fi
               fi
             done <<< "$all_rules"
+
+            # Add this file's reviewers to global set
+            echo "Reviewers for $file: ${!file_reviewers[@]}"
+            for owner in "${!file_reviewers[@]}"; do
+              global_reviewers["$owner"]=1
+            done
+
+            unset file_reviewers  # Clear for next file
           done <<< "$modified_files"
 
-          # Generate final comma-separated list of reviewers
-          unique_reviewers=$(echo "${!reviewer_set[@]}" | tr ' ' ',' | sed 's/^,//;s/,$//')
+          # Generate final reviewer list
+          unique_reviewers=$(echo "${!global_reviewers[@]}" | tr ' ' ',' | sed 's/^,//;s/,$//')
           echo "reviewers=$unique_reviewers" >> $GITHUB_OUTPUT
-          echo "Found all reviewers: $unique_reviewers"
+          echo "Final reviewers across all files: $unique_reviewers"
 
       - name: Assign reviewers and comment
         if: steps.codeowners-parser.outputs.reviewers != ''
