@@ -4,3 +4,4 @@ mindspore==2.7.1
 regex
 download
 rouge_score
+matplotlib

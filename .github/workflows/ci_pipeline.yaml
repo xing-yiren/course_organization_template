@@ -42,7 +42,7 @@ jobs:
     - name: Run Pylint (for .ipynb)
       run: |
         NUM_CORES=$(nproc)
-        export PYTHONPATH=$PYTHONPATH:$(pwd)/single_course_template/courses
+        export PYTHONPATH="${PYTHONPATH}:${GITHUB_WORKSPACE}"
         nbqa pylint single_course_template/courses/*/code --jobs=$NUM_CORES --rcfile=.github/pylint.conf
 
 
@@ -56,15 +56,11 @@ jobs:
       
       - name: Extract Markdown from .ipynb files
         run: |
-          mkdir -p temp_md  # 创建临时目录存储提取的 Markdown
-          # 递归查找所有 .ipynb 文件，按规则提取内容
+          mkdir -p temp_md
           find . -name "*.ipynb" | while IFS= read -r nb; do
-            # 生成临时 .md 文件路径（镜像原始目录结构，避免重名）
             nb_relpath=$(realpath --relative-to=. "$nb")
             temp_md_path="temp_md/${nb_relpath%.ipynb}.md"
-            # 创建临时文件所在的目录（支持多级子目录）
             mkdir -p "$(dirname "$temp_md_path")"
-            # 使用确认的 jq 命令提取内容：单元格内元素直接拼接，单元格间空行分隔
             jq -r '
               .cells 
               | map(select(.cell_type == "markdown") | .source | join("")) 
@@ -77,3 +73,7 @@ jobs:
         with:
           globs: "**/*.md"
           config: '.github/.markdownlint.json'
+
+      - name: Clean up temporary files
+        if: always()
+        run: rm -rf temp_md
