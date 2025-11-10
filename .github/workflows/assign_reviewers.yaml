@@ -30,8 +30,8 @@ jobs:
                 pull_number: context.issue.number,
               });
               // Extract file paths
-              const filePaths = files.map(f => f.filename).join('\n');
-              console.log('Modified files:\n', filePaths);
+              const filePaths = files.map(f => f.filename.replace(/^\//, '')).join('\n');
+              console.log('Modified files (cleaned):\n', filePaths);
               return filePaths;
             } catch (error) {
               console.error('Failed to get modified files:', error);
@@ -48,7 +48,9 @@ jobs:
           fi
 
           # Extract valid rules
-          codeowners=$(grep -v '^#\|^$' .github/CODEOWNERS | awk '{print length($1), $0}' | sort -nr | cut -d' ' -f2-)
+          codeowners=$(grep -v '^#\|^$' .github/CODEOWNERS | \
+            awk '{path = $1; gsub(/^\//, "", path); $1 = path; print length(path), $0}' | \
+            sort -nr | cut -d' ' -f2-)
           modified_files="${{ steps.modified-files.outputs.result }}"
           if [ -z "$modified_files" ]; then
             echo "reviewers=" >> $GITHUB_OUTPUT
@@ -65,24 +67,24 @@ jobs:
               owners=$(echo "$rule" | cut -d' ' -f2- | sed 's/^@//g')
               echo "Checking rule: $path → $owners"
 
-              if [[ "$file" == $path ]]; then
-                echo "Matched specific rule: $path"
-                for owner in $owners; do
-                  clean_owner=$(echo "$owner" | sed 's/^@//')
-                  reviewer_set["$clean_owner"]=1
-                done
-                matched=1
-                break
-              fi
-            done <<< "$codeowners"
+              if [[ "$file" == $path || "$file" == ${path}* ]]; then
+                  echo "Matched rule: $file → $path"
+                  for owner in $owners; do
+                    clean_owner=$(echo "$owner" | sed 's/^@//')
+                    reviewer_set["$clean_owner"]=1
+                    echo "Added reviewer: $clean_owner"
+                  done
+                  matched=1
+                  break
+                fi
+              done <<< "$codeowners"
 
             if [ $matched -eq 0 ]; then
-              echo "No specific rule found, checking root rule"
               while IFS= read -r rule; do
                 path=$(echo "$rule" | awk '{print $1}')
                 owners=$(echo "$rule" | cut -d' ' -f2- | sed 's/^@//g')
-                if [ "$path" = "/" ]; then
-                  echo "Applying root rule: $path"
+                if [ -z "$path" ]; then
+                  echo "Applying root rule, adding owners: $owners"
                   for owner in $owners; do
                     clean_owner=$(echo "$owner" | sed 's/^@//')
                     reviewer_set["$clean_owner"]=1
