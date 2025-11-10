@@ -27,9 +27,13 @@ jobs:
               repo: context.repo.repo,
               pull_number: context.issue.number,
             });
-            const filePaths = files.map(f => f.filename.replace(/^\//, '')).join(';');
-            console.log('Semicolon-delimited files:', filePaths);
-            return filePaths;
+            // Filter out files in the .github directory
+            const filteredFiles = files
+              .map(f => f.filename.replace(/^\//, '')) // Normalize paths
+              .filter(file => !file.startsWith('.github/')); // Exclude .github/...
+
+            console.log('Filtered files (excluding .github/):', filteredFiles);
+            return filteredFiles.join(';'); // Use semicolon delimiter
 
       - name: Parse CODEOWNERS to find reviewers
         id: codeowners-parser
