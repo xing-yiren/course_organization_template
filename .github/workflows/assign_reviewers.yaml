@@ -29,14 +29,10 @@ jobs:
                 repo: context.repo.repo,
                 pull_number: context.issue.number,
               });
-              // Extract file paths
-              const filePaths = files.map(f => f.filename.replace(/^\//, '')).join('\n');
-              console.log('Modified files (cleaned):\n', filePaths);
-              return filePaths;
-            } catch (error) {
-              console.error('Failed to get modified files:', error);
-              throw error;
-            }
+              // Return files as a JSON array (avoids newline splitting issues)
+              const filePaths = files.map(f => f.filename.replace(/^\//, ''));
+              console.log('Modified files:', filePaths);
+              return JSON.stringify(filePaths);
 
       - name: Parse CODEOWNERS to find reviewers
         id: codeowners-parser
@@ -46,25 +42,32 @@ jobs:
             exit 1
           fi
 
-          # Extract and normalize all rules (remove comments/empty lines, trim leading slashes)
+          # Extract and normalize all rules
           all_rules=$(grep -v '^#\|^$' .github/CODEOWNERS | awk '{path=$1; gsub(/^\//, "", path); $1=path; print $0}')
-          modified_files="${{ steps.modified-files.outputs.result }}"
+
+          modified_files_json='${{ steps.modified-files.outputs.result }}'
+          # Convert JSON array to line-separated strings using jq
+          modified_files=$(echo "$modified_files_json" | jq -r '.[]')
+          
           [ -z "$modified_files" ] && { echo "reviewers=" >> $GITHUB_OUTPUT; exit 0; }
 
-          declare -A global_reviewers  # Final unique reviewers across all files
+          declare -A global_reviewers
 
-          # Process EACH file individually
+          echo "Processing files line by line:"
           while IFS= read -r file; do
+            # Skip empty lines (defensive check)
+            [ -z "$file" ] && continue
+            
             echo "=== Processing file: $file ==="
-            declare -A file_reviewers  # Reviewers specific to this file
+            declare -A file_reviewers
 
-            # Check ALL rules against the current file
+            # Check all rules against this file
             while IFS= read -r rule; do
               path=$(echo "$rule" | awk '{print $1}')
               owners=$(echo "$rule" | cut -d' ' -f2- | sed 's/^@//g')
               echo "Checking rule: path='$path', owners='$owners'"
 
-              # Match suffix wildcards (e.g., *.md, *.ipynb)
+              # Match suffix wildcards (e.g., *.md)
               if [[ "$path" == *"*."* ]]; then
                 suffix="${path#*.}"
                 if [[ "$file" == *."$suffix" ]]; then
@@ -74,7 +77,7 @@ jobs:
                     file_reviewers["$clean_owner"]=1
                   done
                 fi
-              # Match path rules (directories or exact paths)
+              # Match path rules (directories)
               else
                 if [[ "$file" == "$path" || "$file" == "${path}"* ]]; then
                   echo "✓ Matched path rule: $file starts with $path"
@@ -86,19 +89,18 @@ jobs:
               fi
             done <<< "$all_rules"
 
-            # Add this file's reviewers to global set
+            # Merge to global reviewers
             echo "Reviewers for $file: ${!file_reviewers[@]}"
             for owner in "${!file_reviewers[@]}"; do
               global_reviewers["$owner"]=1
             done
-
-            unset file_reviewers  # Clear for next file
+            unset file_reviewers
           done <<< "$modified_files"
 
-          # Generate final reviewer list
+          # Output final reviewers
           unique_reviewers=$(echo "${!global_reviewers[@]}" | tr ' ' ',' | sed 's/^,//;s/,$//')
           echo "reviewers=$unique_reviewers" >> $GITHUB_OUTPUT
-          echo "Final reviewers across all files: $unique_reviewers"
+          echo "Final reviewers: $unique_reviewers"
 
       - name: Assign reviewers and comment
         if: steps.codeowners-parser.outputs.reviewers != ''
