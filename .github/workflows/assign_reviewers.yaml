@@ -27,13 +27,9 @@ jobs:
               repo: context.repo.repo,
               pull_number: context.issue.number,
             });
-            // Filter out files in the .github directory
-            const filteredFiles = files
-              .map(f => f.filename.replace(/^\//, '')) // Normalize paths
-              .filter(file => !file.startsWith('.github/')); // Exclude .github/...
-
-            console.log('Filtered files (excluding .github/):', filteredFiles);
-            return filteredFiles.join(';'); // Use semicolon delimiter
+            const filePaths = files.map(f => f.filename.replace(/^\//, '')).join(';');
+            console.log('Semicolon-delimited files:', filePaths);
+            return filePaths;
 
       - name: Parse CODEOWNERS to find reviewers
         id: codeowners-parser
@@ -44,7 +40,7 @@ jobs:
           fi
 
           # Get semicolon-delimited files and split into array
-          modified_files_str="${{ steps.modified-files.outputs.result }}"
+          modified_files_str=${{ steps.modified-files.outputs.result }}
           IFS=';' read -ra modified_files <<< "$modified_files_str"
 
           # Verify split worked
