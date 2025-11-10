@@ -22,17 +22,15 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            try {
-              // Get list of modified files
-              const { data: files } = await github.rest.pulls.listFiles({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                pull_number: context.issue.number,
-              });
-              // Return files as a JSON array (avoids newline splitting issues)
-              const filePaths = files.map(f => f.filename.replace(/^\//, ''));
-              console.log('Modified files:', filePaths);
-              return JSON.stringify(filePaths);
+            const { data: files } = await github.rest.pulls.listFiles({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.issue.number,
+            });
+            // Return files as a JSON array (avoids newline splitting issues)
+            const filePaths = files.map(f => f.filename.replace(/^\//, ''));
+            console.log('Modified files:', filePaths);
+            return JSON.stringify(filePaths);
 
       - name: Parse CODEOWNERS to find reviewers
         id: codeowners-parser
