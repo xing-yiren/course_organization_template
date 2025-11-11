@@ -86,7 +86,10 @@
 
 ## 交流
 
-<div align=center>
-<img alt="wechat-assistant" src="./images/wechat_assistant.png" width="20%">
-<img alt="qq-group-chat" src="./images/qq_group_chat.png" width="20%">
+<div align="center">
+
+| <img alt="wechat-assistant" src="./images/wechat_assistant.png" width="200px">| <img alt="qq-group-chat" src="./images/qq_group_chat.png" width="200px"> |
+| :-----------------------: | :-----------------------: |
+| 微信交流群（添加小助手邀请进群） | QQ交流群 |
+
 </div>
