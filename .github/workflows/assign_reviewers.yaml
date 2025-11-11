@@ -165,6 +165,8 @@ jobs:
             const prNumber = context.issue.number;
             const reviewers = '${{ steps.codeowners-parser.outputs.reviewers }}'.split(',').filter(r => r);
 
+            console.log(`Assigning reviewers to: ${reviewers.join(', ')}`);
+
             try {
               await github.rest.pulls.requestReviewers({
                 owner: context.repo.owner,
