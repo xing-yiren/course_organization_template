@@ -146,14 +146,21 @@ jobs:
           unique_reviewers=$(echo "${!global_reviewers[@]}" | tr ' ' ',' | sed 's/^,//;s/,$//')
           echo "reviewers=$unique_reviewers" >> $GITHUB_OUTPUT
           echo -e "\nFinal reviewers: $unique_reviewers"
+      
+      - name: Check if PAT exists
+        run: |
+          if [ -z "${{ secrets.REVIEWER_PAT }}" ]; then
+            echo "Secret REVIEWER_PAT is not set"
+          else
+            echo "Secret REVIEWER_PAT exists"
+          fi
 
-      - name: Assign reviewers and comment (internal PRs)
+      - name: Assign reviewers and comment
         if: >
-          steps.codeowners-parser.outputs.reviewers != '' &&
-          github.event.pull_request.head.repo.full_name == github.repository
+          steps.codeowners-parser.outputs.reviewers != ''
         uses: actions/github-script@v7
         with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
+          github-token: ${{ secrets.REVIEWER_PAT }}
           script: |
             const reviewers = '${{ steps.codeowners-parser.outputs.reviewers }}'.split(',').filter(r => r);
             console.log('Assigning reviewers:', reviewers);
@@ -175,21 +182,3 @@ jobs:
             } catch (error) {
               console.error('Error:', error.message);
             }
-
-      - name: Only comment (forked PRs)
-        if: >
-          steps.codeowners-parser.outputs.reviewers != '' &&
-          github.event.pull_request.head.repo.full_name != github.repository
-        uses: actions/github-script@v7
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
-            const reviewers = '${{ steps.codeowners-parser.outputs.reviewers }}'.split(',').filter(r => r);
-            const commentReviewers = reviewers.map(r => `@${r}`).join(' ');
-            // Only comment without assigning reviewers
-            await github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: `Thanks for your contribution! This PR needs review from ${commentReviewers}. Please manually request their review.`
-            });
