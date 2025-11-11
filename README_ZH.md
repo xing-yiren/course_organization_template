@@ -24,44 +24,48 @@
         <td rowspan="3">1</td>
         <td rowspan="3">昇思技术公开课</td>
         <td><a href="">深度学习原理与实践（以MindSpore为例）</a></td>
-        <td>@usrname</td>
+        <td>@qhzhuang</td>
     </tr>
     <tr>
         <td><a href="https://github.com/mindspore-courses/orange-pi-mindspore">昇思+昇腾开发板：软硬结合玩转大模型实战</a></td>
-        <td>@usrname</td>
+        <td>@xing-yiren</td>
     </tr>
     <tr>
         <td><a href="https://github.com/mindspore-courses/step_into_llm">大模型专题</a></td>
-        <td>@usrname</td>
+        <td>@qhzhuang</td>
     </tr>
     <tr>
         <td>2</td>
         <td>应用案例</td>
-        <td><a href="https://github.com/mindspore-courses/applications">applications</a></td>
-        <td>@usrname</td>
+        <td><a href="https://github.com/mindspore-courses/applications">访问仓库（applications）</a></td>
+        <td>@xing-yiren</td>
     </tr>
     <tr>
         <td>3</td>
         <td>比赛</td>
-        <td><a href="https://github.com/mindspore-courses/competition">competition</a></td>
-        <td>@usrname</td>
+        <td><a href="https://github.com/mindspore-courses/competition">访问仓库（competition）</a></td>
+        <td>@qhzhuang</td>
     </tr>
     <tr>
         <td>4</td>
         <td>学术科研</td>
         <td></td>
-        <td>@username</td>
+        <td>@lvyufeng</td>
     </tr>
     <tr>
-        <td>5</td>
-        <td>教材教辅</td>
+        <td rowspan="2">5</td>
+        <td rowspan="2">教材教辅</td>
         <td><a href="https://e.huawei.com/cn/talent/outPage/#/sxz-course/home?courseId=K--4yKm9T9VTCjwXOw5VyL66JpI">人工智能：原理与应用</a></td>
-        <td>-</td>
+        <td rowspan="2">@xing-yiren</td>
+    </tr>
+    <tr>
+        <td><a href="https://github.com/mindspore-courses/d2l-mindspore">动手学深度学习（MindSpore版）</a></td>
+    </tr>
     <tr>
         <td>6</td>
         <td>昇思开发者布道师</td>
         <td><a href="https://www.mindspore.cn/developers">认证入口</a></td>
-        <td>-</td>
+        <td>@xing-yiren</td>
     </tr>
 
 </table>
