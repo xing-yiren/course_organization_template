@@ -19,17 +19,17 @@
         <th>No.</th>
         <th>Resources</th>
         <th>Links</th>
-        <th style="width: 200px; white-space: nowrap;">Committer</th>
+        <th style="width: 90px; white-space: nowrap;">Committer</th>
     </tr>
     <tr>
         <td rowspan="3">1</td>
         <td rowspan="3">MindSpore Technical Open Courses</td>
         <td><a href="">Deep Learning: Principles and Practice with MindSpore</a></td>
-        <td>@qhzhuang</td>
+        <td >@qhzhuang</td>
     </tr>
     <tr>
         <td><a href="https://github.com/mindspore-courses/orange-pi-mindspore">MindSpore + Orange Pi: Hands-On Large Language Model Practice</a></td>
-        <td>@xing-yiren</td>
+        <td style="width: 90px; white-space: nowrap;">@xing-yiren</td>
     </tr>
     <tr>
         <td><a href="https://github.com/mindspore-courses/step_into_llm">Step into LLM</a></td>
@@ -39,7 +39,7 @@
         <td>2</td>
         <td>Application Examples</td>
         <td><a href="https://github.com/mindspore-courses/applications">Access the Repository</a></td>
-        <td>@xing-yiren</td>
+        <td style="width: 90px; white-space: nowrap;">@xing-yiren</td>
     </tr>
     <tr>
         <td>3</td>
@@ -57,7 +57,7 @@
         <td rowspan="2">5</td>
         <td rowspan="2">Teaching Resources</td>
         <td><a href="https://e.huawei.com/cn/talent/outPage/#/sxz-course/home?courseId=K--4yKm9T9VTCjwXOw5VyL66JpI">Artificial Intelligence: Principles and Applications</a></td>
-        <td rowspan="2">@xing-yiren</td>
+        <td rowspan="2" style="width: 90px; white-space: nowrap;">@xing-yiren</td>
     </tr>
     <tr>
         <td><a href="https://github.com/mindspore-courses/d2l-mindspore">d2l-mindspore</a></td>
@@ -66,7 +66,7 @@
         <td>6</td>
         <td>MindSpore Developers and Developer Advoacates</td>
         <td><a href="https://www.mindspore.cn/developers/en">Apply for Certification</a></td>
-        <td>@xing-yiren</td>
+        <td style="width: 90px; white-space: nowrap;">@xing-yiren</td>
     </tr>
 
 </table>
