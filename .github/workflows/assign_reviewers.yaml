@@ -53,7 +53,7 @@ jobs:
           all_rules=$(grep -v '^#\|^$' .github/CODEOWNERS)
           
           # Detect root rule using original path "/" (before normalization)
-          root_owners=$(echo "$all_rules" | awk '$1 == "/" {print substr($0, index($0, $2))}' | sed 's/^@//g')
+          root_owners=$(echo "$all_rules" | awk '$1 == "/" {for(i=2; i<=NF; i++) printf "%s ", $i; print ""}' | sed 's/^@//g; s/ $//')
           if [ -z "$root_owners" ]; then
             echo "Error: No root directory reviewers found in CODEOWNERS (expected '/ @username')"
             exit 1
@@ -61,8 +61,18 @@ jobs:
           echo "Root reviewers (mandatory): $root_owners"
 
           # Normalize rules (strip leading slashes) for matching
-          normalized_rules=$(echo "$all_rules" | awk '{path=$1; gsub(/^\//, "", path); $1=path; print $0}')
-  
+          normalized_rules=$(echo "$all_rules" | awk '
+            {
+              path = $1;
+              gsub(/^\//, "", path);
+              owners = "";
+              for(i=2; i<=NF; i++) {
+                owners = owners " " $i;
+              }
+              print path owners;
+            }
+          ')
+
           [ ${#modified_files[@]} -eq 0 ] && { echo "reviewers=" >> $GITHUB_OUTPUT; exit 0; }
 
           # Associative array to store all unique reviewers across files
@@ -83,7 +93,9 @@ jobs:
             # Check all rules against current file
             while IFS= read -r rule; do
               path=$(echo "$rule" | awk '{print $1}')
-              [ "$path" == "" ] && continue  # Skip root rule (already handled)
+              if [ -z "$path" ] && [ -n "$owners" ]; then
+                continue  # Skip root rule (already handled)
+              fi
 
               owners=$(echo "$rule" | cut -d' ' -f2- | sed 's/^@//g')
               echo "Checking rule: path='$path', owners='$owners'"
