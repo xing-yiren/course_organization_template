@@ -53,8 +53,21 @@ jobs:
           all_rules=$(grep -v '^#\|^$' .github/CODEOWNERS | awk '{path=$1; gsub(/^\//, "", path); $1=path; print $0}')
           [ ${#modified_files[@]} -eq 0 ] && { echo "reviewers=" >> $GITHUB_OUTPUT; exit 0; }
 
+          root_owners=$(echo "$all_rules" | awk '{if ($1 == "") print $0}' | cut -d' ' -f2- | sed 's/^@//g')
+          
+          if [ -z "$root_owners" ]; then
+            echo "Warning: No root directory reviewers found in CODEOWNERS"
+            exit 1  # Root reviewers must exist, otherwise eixt
+          fi
+          echo "Repository committer (mandatory): $root_owners"
+
           # Associative array to store all unique reviewers across files
           declare -A global_reviewers
+
+          for owner in $root_owners; do
+            clean_owner=$(echo "$owner" | sed 's/^@//')
+            global_reviewers["$clean_owner"]=1
+          done
 
           echo -e "\nProcessing each file:"
           for file in "${modified_files[@]}"; do
@@ -123,7 +136,7 @@ jobs:
                 issue_number: context.issue.number,
                 owner: context.repo.owner,
                 repo: context.repo.repo,
-                body: `This PR needs review, please ${commentReviewers} take a look~`
+                body: `This PR needs review. Please take a look, ${commentReviewers}, and feel free to invite another committer to review as well.`
               });
             } catch (error) {
               console.error('Error:', error.message);
