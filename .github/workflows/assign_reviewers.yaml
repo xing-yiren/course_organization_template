@@ -49,17 +49,21 @@ jobs:
             echo " - $file"
           done
 
-          # Extract and normalize all rules
-          all_rules=$(grep -v '^#\|^$' .github/CODEOWNERS | awk '{path=$1; gsub(/^\//, "", path); $1=path; print $0}')
-          [ ${#modified_files[@]} -eq 0 ] && { echo "reviewers=" >> $GITHUB_OUTPUT; exit 0; }
-
-          root_owners=$(echo "$all_rules" | awk '{if ($1 == "") print $0}' | cut -d' ' -f2- | sed 's/^@//g')
+          # Extract and normalize all rules (preserve original root path for detection)
+          all_rules=$(grep -v '^#\|^$' .github/CODEOWNERS)
           
+          # Detect root rule using original path "/" (before normalization)
+          root_owners=$(echo "$all_rules" | awk '$1 == "/" {print substr($0, index($0, $2))}' | sed 's/^@//g')
           if [ -z "$root_owners" ]; then
-            echo "Warning: No root directory reviewers found in CODEOWNERS"
-            exit 1  # Root reviewers must exist, otherwise eixt
+            echo "Error: No root directory reviewers found in CODEOWNERS (expected '/ @username')"
+            exit 1
           fi
-          echo "Repository committer (mandatory): $root_owners"
+          echo "Root reviewers (mandatory): $root_owners"
+
+          # Normalize rules (strip leading slashes) for matching
+          normalized_rules=$(echo "$all_rules" | awk '{path=$1; gsub(/^\//, "", path); $1=path; print $0}')
+  
+          [ ${#modified_files[@]} -eq 0 ] && { echo "reviewers=" >> $GITHUB_OUTPUT; exit 0; }
 
           # Associative array to store all unique reviewers across files
           declare -A global_reviewers
@@ -79,6 +83,8 @@ jobs:
             # Check all rules against current file
             while IFS= read -r rule; do
               path=$(echo "$rule" | awk '{print $1}')
+              [ "$path" == "" ] && continue  # Skip root rule (already handled)
+
               owners=$(echo "$rule" | cut -d' ' -f2- | sed 's/^@//g')
               echo "Checking rule: path='$path', owners='$owners'"
 
@@ -100,7 +106,7 @@ jobs:
                   done
                 fi
               fi
-            done <<< "$all_rules"
+            done <<< "$normalized_rules"
 
             # Merge to global reviewers
             echo "Reviewers for $file: ${!file_reviewers[@]}"
