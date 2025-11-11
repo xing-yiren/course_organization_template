@@ -110,7 +110,6 @@ jobs:
                 continue  # Skip root rule (already handled)
               fi
 
-              owners=$(echo "$rule" | awk '{$1=""; print $0}' | sed 's/^ //; s/ $//; s/^@//g')
               echo "Checking rule: path='$path', owners='$owners'"
 
               # Match suffix wildcards (e.g., *.md)
