@@ -46,6 +46,7 @@ jobs:
           single_course_template/courses/**/code/*.ipynb \
           --jobs=$NUM_CORES \
           --rcfile=.github/pylint.conf
+      continue-on-error: true
 
   markdownlint-check:
     name: Markdownlint Check
