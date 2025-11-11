@@ -1,8 +1,8 @@
 name: Auto Assign Reviewers
 
 on:
-  pull_request:
-    types: [opened, edited, synchronize]
+  pull_request_target:
+    types: [opened, synchronize]
 
 jobs:
   get-reviewers:
@@ -162,19 +162,19 @@ jobs:
         with:
           github-token: ${{ secrets.REVIEWER_PAT }}
           script: |
+            const prNumber = context.issue.number;
             const reviewers = '${{ steps.codeowners-parser.outputs.reviewers }}'.split(',').filter(r => r);
-            console.log('Assigning reviewers:', reviewers);
 
             try {
               await github.rest.pulls.requestReviewers({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
-                pull_number: context.issue.number,
+                pull_number: prNumber,
                 reviewers: reviewers
               });
               const commentReviewers = reviewers.map(r => `@${r}`).join(' ');
               await github.rest.issues.createComment({
-                issue_number: context.issue.number,
+                issue_number: prNumber,
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 body: `This PR needs review. Please take a look, ${commentReviewers}, and feel free to invite another committer to review as well.`
