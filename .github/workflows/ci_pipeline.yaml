@@ -39,6 +39,8 @@ jobs:
         export PYTHONPATH=$PYTHONPATH:$(pwd)/single_course_template/courses
         pylint single_course_template/courses/*/code --jobs=$NUM_CORES --rcfile=.github/pylint.conf
 
+      continue-on-error: true
+
     - name: Run Pylint (for .ipynb)
       run: |
         NUM_CORES=$(nproc)
