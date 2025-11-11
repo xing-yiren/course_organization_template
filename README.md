@@ -25,39 +25,39 @@
         <td rowspan="3">1</td>
         <td rowspan="3">MindSpore Technical Open Courses</td>
         <td><a href="">Deep Learning: Principles and Practice with MindSpore</a></td>
-        <td>@usrname</td>
+        <td>@qhzhuang</td>
     </tr>
     <tr>
         <td><a href="https://github.com/mindspore-courses/orange-pi-mindspore">MindSpore + Orange Pi: Hands-On Large Language Model Practice</a></td>
-        <td>@usrname</td>
+        <td>@xing-yiren</td>
     </tr>
     <tr>
         <td><a href="https://github.com/mindspore-courses/step_into_llm">Step into LLM</a></td>
-        <td>@usrname</td>
+        <td>@qhzhuang</td>
     </tr>
     <tr>
         <td>2</td>
         <td>Application Examples</td>
         <td><a href="https://github.com/mindspore-courses/applications">Access the Repository</a></td>
-        <td>@usrname</td>
+        <td>@xing-yiren</td>
     </tr>
     <tr>
         <td>3</td>
         <td>Competitions</td>
         <td><a href="https://github.com/mindspore-courses/competition">Access the Repository</a></td>
-        <td>@usrname</td>
+        <td>@qhzhuang</td>
     </tr>
     <tr>
         <td>4</td>
         <td>Researches</td>
         <td></td>
-        <td>@username</td>
+        <td>@lvyufeng</td>
     </tr>
     <tr>
         <td rowspan="2">5</td>
         <td rowspan="2">Teaching Resources</td>
         <td><a href="https://e.huawei.com/cn/talent/outPage/#/sxz-course/home?courseId=K--4yKm9T9VTCjwXOw5VyL66JpI">Artificial Intelligence: Principles and Applications</a></td>
-        <td>-</td>
+        <td rowspan="2">@xing-yiren</td>
     </tr>
     <tr>
         <td><a href="https://github.com/mindspore-courses/d2l-mindspore">d2l-mindspore</a></td>
@@ -66,7 +66,7 @@
         <td>6</td>
         <td>MindSpore Developers and Developer Advoacates</td>
         <td><a href="https://www.mindspore.cn/developers/en">Apply for Certification</a></td>
-        <td>-</td>
+        <td>@xing-yiren</td>
     </tr>
 
 </table>
