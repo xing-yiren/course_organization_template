@@ -19,7 +19,7 @@
         <th>No.</th>
         <th>Resources</th>
         <th>Links</th>
-        <th style="width: 80px; white-space: nowrap;">Committer</th>
+        <th style="width: 90px; white-space: nowrap;">Committer</th>
     </tr>
     <tr>
         <td rowspan="3">1</td>
