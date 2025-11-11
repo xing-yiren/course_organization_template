@@ -53,7 +53,7 @@ jobs:
           all_rules=$(grep -v '^#\|^$' .github/CODEOWNERS)
           
           # Detect root rule using original path "/" (before normalization)
-          root_owners=$(echo "$all_rules" | awk '$1 == "/" {for(i=2; i<=NF; i++) printf "%s ", $i; print ""}' | sed 's/^@//g; s/ $//')
+          root_owners=$(echo "$all_rules" | grep -E '^/[[:space:]]+@' | sed -E 's|^/[[:space:]]+@?||; s/[[:space:]]+$//')
           if [ -z "$root_owners" ]; then
             echo "Error: No root directory reviewers found in CODEOWNERS (expected '/ @username')"
             exit 1
@@ -61,17 +61,30 @@ jobs:
           echo "Root reviewers (mandatory): $root_owners"
 
           # Normalize rules (strip leading slashes) for matching
-          normalized_rules=$(echo "$all_rules" | awk '
+          normalized_rules=$(echo "$all_rules" | grep -v '^/[[:space:]]' | awk '
             {
+              # Path must be the first column and cannot contain @ (to exclude reviewers)
               path = $1;
-              gsub(/^\//, "", path);
+              gsub(/^\//, "", path);  # Remove leading slash from path
+              
+              # Extract reviewers starting from the 2nd column (only @-prefixed entries)
               owners = "";
               for(i=2; i<=NF; i++) {
-                owners = owners " " $i;
+                if ($i ~ /^@/) {   # Only keep entries starting with @ (valid reviewers)
+                  owners = owners " " substr($i, 2);  # Remove @
+                }
               }
-              print path owners;
+              # Only output rules with valid paths and reviewers
+              if (path != "" && owners != "") {
+                print path "|" owners;  # Use | as delimiter to separate path and owners (avoids confusion)
+              }
             }
           ')
+
+          echo -e "\nNormalized rules (path|owners):"
+          echo "$normalized_rules" | while IFS='|' read -r p o; do
+            echo " - Path: '$p', Owners: '$o'"
+          done
 
           [ ${#modified_files[@]} -eq 0 ] && { echo "reviewers=" >> $GITHUB_OUTPUT; exit 0; }
 
@@ -91,13 +104,13 @@ jobs:
             declare -A file_reviewers
 
             # Check all rules against current file
-            while IFS= read -r rule; do
+            while IFS='|' read -r path owners; do
               path=$(echo "$rule" | awk '{print $1}')
               if [ -z "$path" ] && [ -n "$owners" ]; then
                 continue  # Skip root rule (already handled)
               fi
 
-              owners=$(echo "$rule" | cut -d' ' -f2- | sed 's/^@//g')
+              owners=$(echo "$rule" | awk '{$1=""; print $0}' | sed 's/^ //; s/ $//; s/^@//g')
               echo "Checking rule: path='$path', owners='$owners'"
 
               # Match suffix wildcards (e.g., *.md)
