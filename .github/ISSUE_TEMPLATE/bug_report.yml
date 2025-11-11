@@ -45,9 +45,9 @@ body:
     required: true
 - type: input
   attributes:
-    label: MindSpore Version
-    description: What version of MindSpore are you using? (e.g., 2.7.1)
-    placeholder: "2.7.1"
+    label: OS Platform
+    description: Which operating system are you using? (e.g., Ubuntu 20.04)
+    placeholder: "Ubuntu 20.04"
   validations:
     required: true
 - type: input
@@ -59,11 +59,37 @@ body:
     required: true
 - type: input
   attributes:
-    label: OS Platform
-    description: Which operating system are you using? (e.g., Ubuntu 20.04)
-    placeholder: "Ubuntu 20.04"
+    label: MindSpore Version
+    description: What version of MindSpore are you using? (e.g., 2.7.1)
+    placeholder: "2.7.1"
   validations:
     required: true
+- type: input
+  id: mindspore_nlp
+  attributes:
+    label: (Optional) MindSpore NLP Version
+    placeholder: e.g., 0.5.0
+  validations:
+    required: false
+- type: input
+  id: mindspore_transformers
+  attributes:
+    label: (Optional) MindSpore Transformers Version
+    placeholder: e.g., 1.7.0
+  validations:
+    required: false
+- type: textarea
+  id: other_suites
+  attributes:
+    label: (Optional) Other Toolkit or Suite Versions
+    description: |
+      Specify versions of any other MindSpore-related suites (e.g., MindSpore Lite, vLLM-MindSpore) or relevant third-party packages.
+    placeholder: |
+      e.g.,
+      - MindSpore Lite 2.7.0
+      - vLLM-MindSpore 0.4.0
+  validations:
+    required: false
 - type: textarea
   attributes:
     label: Additional Context
