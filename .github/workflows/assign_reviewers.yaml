@@ -105,9 +105,10 @@ jobs:
 
             # Check all rules against current file
             while IFS='|' read -r path owners; do
-              path=$(echo "$rule" | awk '{print $1}')
-              if [ -z "$path" ] && [ -n "$owners" ]; then
-                continue  # Skip root rule (already handled)
+
+              if [ -z "$path" ] || [ -z "$owners" ]; then
+                echo "[Debug] Skipping invalid rule: path='$path', owners='$owners'"
+                continue
               fi
 
               echo "Checking rule: path='$path', owners='$owners'"
