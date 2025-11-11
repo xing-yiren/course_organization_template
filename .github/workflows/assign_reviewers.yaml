@@ -148,10 +148,11 @@ jobs:
           echo -e "\nFinal reviewers: $unique_reviewers"
 
       - name: Assign reviewers and comment
-        if: steps.codeowners-parser.outputs.reviewers != ''
+        if: >
+          steps.codeowners-parser.outputs.reviewers != ''
         uses: actions/github-script@v7
         with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
+          github-token: ${{ secrets.REVIEWER_PAT }}
           script: |
             const reviewers = '${{ steps.codeowners-parser.outputs.reviewers }}'.split(',').filter(r => r);
             console.log('Assigning reviewers:', reviewers);

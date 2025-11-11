@@ -42,9 +42,10 @@ jobs:
     - name: Run Pylint (for .ipynb)
       run: |
         NUM_CORES=$(nproc)
-        export PYTHONPATH="${PYTHONPATH}:${GITHUB_WORKSPACE}"
-        nbqa pylint single_course_template/courses/*/code --jobs=$NUM_CORES --rcfile=.github/pylint.conf
-
+        nbqa pylint \
+          single_course_template/courses/**/code/*.ipynb \
+          --jobs=$NUM_CORES \
+          --rcfile=.github/pylint.conf
 
   markdownlint-check:
     name: Markdownlint Check
