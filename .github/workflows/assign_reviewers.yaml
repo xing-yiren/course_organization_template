@@ -162,19 +162,42 @@ jobs:
         with:
           github-token: ${{ secrets.REVIEWER_PAT }}
           script: |
+            // 1. Parse target reviewers list (from CODEOWNERS or other sources)
+            const targetReviewers = '${{ steps.codeowners-parser.outputs.reviewers }}'.split(',').filter(r => r);
+            if (targetReviewers.length === 0) {
+              console.log("No target reviewers found, skipping.");
+              return;
+            }
+            console.log("Target reviewers:", targetReviewers);
             const prNumber = context.issue.number;
-            const reviewers = '${{ steps.codeowners-parser.outputs.reviewers }}'.split(',').filter(r => r);
 
-            console.log(`Assigning reviewers to: ${reviewers.join(', ')}`);
+            // 2. Fetch currently assigned reviewers for the PR
+            const { data: currentReviews } = await github.rest.pulls.listRequestedReviewers({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: prNumber
+            });
+            const currentReviewers = currentReviews.users.map(user => user.login);  // Extract usernames
+            console.log("Current assigned reviewers:", currentReviewers);
 
+            // 3. Check if all target reviewers are already assigned
+            const allAssigned = targetReviewers.every(reviewer => currentReviewers.includes(reviewer));
+
+            if (allAssigned) {
+              console.log("All target reviewers are already assigned. Skipping.");
+              return;
+            }
+
+            // 4. Assign missing reviewers and add comment
+            const missingReviewers = targetReviewers.filter(r => !currentReviewers.includes(r));
             try {
               await github.rest.pulls.requestReviewers({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 pull_number: prNumber,
-                reviewers: reviewers
+                reviewers: missingReviewers
               });
-              const commentReviewers = reviewers.map(r => `@${r}`).join(' ');
+              const commentReviewers = targetReviewers.map(r => `@${r}`).join(' ');
               await github.rest.issues.createComment({
                 issue_number: prNumber,
                 owner: context.repo.owner,
