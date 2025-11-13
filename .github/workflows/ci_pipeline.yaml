@@ -16,7 +16,7 @@ on:
 # A workflow run is made up of one or more jobs that can run sequentially or in parallel
 jobs:
   pylint-check:
-    name: Run Pylint
+    name: Pylint Check
     runs-on: ubuntu-latest
 
     steps:
@@ -33,8 +33,50 @@ jobs:
         python -m pip install --upgrade pip==24.0
         if [ -f "requirements.txt" ]; then pip install -r requirements.txt; fi
 
-    - name: Run Pylint
+    - name: Run Pylint (for .py)
       run: |
         NUM_CORES=$(nproc)
         export PYTHONPATH=$PYTHONPATH:$(pwd)/single_course_template/courses
         pylint single_course_template/courses/*/code --jobs=$NUM_CORES --rcfile=.github/pylint.conf
+
+      continue-on-error: true
+
+    - name: Run Pylint (for .ipynb)
+      run: |
+        NUM_CORES=$(nproc)
+        nbqa pylint \
+          single_course_template/courses/**/code/*.ipynb \
+          --jobs=$NUM_CORES \
+          --rcfile=.github/pylint.conf
+
+  markdownlint-check:
+    name: Markdownlint Check
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+      
+      - name: Extract Markdown from .ipynb files
+        run: |
+          mkdir -p temp_md
+          find . -name "*.ipynb" | while IFS= read -r nb; do
+            nb_relpath=$(realpath --relative-to=. "$nb")
+            temp_md_path="temp_md/${nb_relpath%.ipynb}.md"
+            mkdir -p "$(dirname "$temp_md_path")"
+            jq -r '
+              .cells 
+              | map(select(.cell_type == "markdown") | .source | join("")) 
+              | join("\n\n")
+            ' "$nb" > "$temp_md_path"
+          done
+      
+      - name: Run markdownlint
+        uses: DavidAnson/markdownlint-cli2-action@v15
+        with:
+          globs: "**/*.md"
+          config: '.github/.markdownlint.json'
+
+      - name: Clean up temporary files
+        if: always()
+        run: rm -rf temp_md
