@@ -66,12 +66,6 @@ jobs:
           echo "Labels to remove: "
           cat remove_labels.txt
 
-      - name: Test App token
-        run: |
-          echo "App Token: ${{ steps.generate-token.outputs.token }}"
-          echo "Repository: ${{ github.repository }}"
-          echo "Issue Number: ${{ github.event.issue.number }}"
-
       - name: Add missing labels
         run: |
           if [ -s add_labels.txt ]; then
@@ -98,10 +92,11 @@ jobs:
             while IFS= read -r label; do
               if [ -n "$label" ]; then
                 echo "Remove label: $label"
+                ENCODED_LABEL=$(printf "%s" "$label" | jq -sRr @uri)
                 curl -X DELETE \
-                  -H "Authorization: token ${{ steps.generate-token.outputs.token }}" \  # 替换为 App 令牌
+                  -H "Authorization: token ${{ steps.generate-token.outputs.token }}" \
                   -H "Accept: application/vnd.github.v3+json" \
-                  "https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.issue.number }}/labels/$label"
+                  "https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.issue.number }}/labels/$ENCODED_LABEL"
               fi
             done < remove_labels.txt
           else
