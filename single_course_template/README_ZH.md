@@ -24,7 +24,7 @@
 
 ## 环境准备
 
-为确保项目仓中实践代码可正常运行，推荐以下环境准备方式。
+为确保项目仓中实践代码可正常运行，推荐以下环境准备方式。更详细的环境准备指导详见[Wiki](wiki链接)。
 
 ### 直接安装依赖
 
@@ -44,7 +44,7 @@ pip install requirements.txt
 | GPU     | xxx             | xxx      | xxx                       | xxx            |
 | NPU     | xxx             | xxx      | xxx                       | xxx            |
 
-镜像基础使用教程详见：[Docker镜像使用](./dockerfile/README.md)
+镜像基础使用教程详见环境准备Wiki中的[Docker镜像使用](./dockerfile/README.md)部分。
 
 ## 课程内容
 
@@ -66,8 +66,7 @@ pip install requirements.txt
 
 ## 常见问题（FAQ）
 
-- 问题1：xxx
-    - 解答：xxx
+详见Wiki中[FAQ](wiki链接)。
 
 ## 贡献与反馈
 

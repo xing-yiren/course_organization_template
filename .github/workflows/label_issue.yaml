@@ -10,21 +10,29 @@ jobs:
   label-hardware:
     runs-on: ubuntu-latest
     steps:
+      - name: Generate GitHub App token
+        id: generate-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          installation-id: ${{ secrets.INSTALLATION_ID }}
+
       - name: Get hardware selection
         id: get_hardware
         run: |
           ISSUE_BODY=$(jq -r '.issue.body' "$GITHUB_EVENT_PATH")
-          
+
           HARDWARE_RAW=$(echo "$ISSUE_BODY" | awk '
             /^### Hardware Environment/ { flag=1; next }
             flag==1 && /^###/ { flag=0 }
             flag==1 { print $0 }
           ')
-          
+
           echo "$HARDWARE_RAW" | grep -oP '\[x\] \K.*' | tr '[:upper:]' '[:lower:]' | sed '/^$/d' > target_labels.txt || true
-          
+
           touch target_labels.txt
-          
+
           echo "Target lables: "
           cat target_labels.txt
 
@@ -32,10 +40,10 @@ jobs:
         id: get_current
         run: |
           set -euo pipefail
-          
-          CURRENT_LABELS=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+
+          CURRENT_LABELS=$(curl -s -H "Authorization: token ${{ steps.generate-token.outputs.token }}" \
             "https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.issue.number }}/labels" || echo "[]")
-          
+
           echo "$CURRENT_LABELS" | jq -r '.[].name // empty' | grep -E '^(ascend|gpu|cpu)$' > current_labels.txt || true
 
           touch current_labels.txt
@@ -48,7 +56,7 @@ jobs:
         run: |
           sort target_labels.txt > target_sorted.txt
           sort current_labels.txt > current_sorted.txt
-          
+
           comm -23 target_sorted.txt current_sorted.txt > add_labels.txt
 
           comm -13 target_sorted.txt current_sorted.txt > remove_labels.txt
@@ -65,7 +73,7 @@ jobs:
               if [ -n "$label" ]; then
                 echo "Add label: $label"
                 curl -X POST \
-                  -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+                  -H "Authorization: token ${{ steps.generate-token.outputs.token }}" \  # 替换为 App 令牌
                   -H "Accept: application/vnd.github.v3+json" \
                   "https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.issue.number }}/labels" \
                   -d "[\"$label\"]"
@@ -82,7 +90,7 @@ jobs:
               if [ -n "$label" ]; then
                 echo "Remove label: $label"
                 curl -X DELETE \
-                  -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+                  -H "Authorization: token ${{ steps.generate-token.outputs.token }}" \  # 替换为 App 令牌
                   -H "Accept: application/vnd.github.v3+json" \
                   "https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.issue.number }}/labels/$label"
               fi

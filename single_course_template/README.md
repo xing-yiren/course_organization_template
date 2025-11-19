@@ -24,7 +24,7 @@ You can take the [Prerequisite Test](exam_link) to assess your readiness.
 
 ## Environment Setup
 
-To ensure all example code runs smoothly, set up your environment using one of the following methods.
+To ensure all example code runs smoothly, set up your environment using one of the following methods. For details, see [Set Up Development Environment](wiki_link) in Wiki.
 
 ### Install Dependencies
 
@@ -46,7 +46,7 @@ You can find all course images in the [dockerfile](./dockerfile/) directory and 
 | GPU     | xxx             | xxx      | xxx                       | xxx            |
 | NPU     | xxx             | xxx      | xxx                       | xxx            |
 
-For details, see [Using Docker Images](./dockerfile/README.md).
+For details, see [Using Docker Images](wiki_link) in Wiki.
 
 ## Course Content
 
@@ -72,8 +72,7 @@ New releases of this repository are published approximately **every six months**
 
 ## FAQ
 
-- **Q1**：xxx
-    - **A**：xxx
+See the [FAQ](wiki_link) in the Wiki.
 
 ## Contributing
 
