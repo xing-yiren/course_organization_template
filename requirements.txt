@@ -1,5 +1,7 @@
 pylint==2.17
+nbqa==0.12.0
 mindspore==2.7.1
 regex
 download
 rouge_score
+matplotlib

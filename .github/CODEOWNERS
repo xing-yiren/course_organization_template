@@ -1,0 +1,13 @@
+# .github/CODEOWNERS
+
+# All files in the root directory, reviewed by @xing-yiren by default
+/ @xing-yiren
+
+# Files related to course 01_mingpt, reviewed by @teacher1
+# /single_course_template/courses/01_mingpt/ @allendyu
+
+# All .ipynb files (regardless of location), additionally reviewed by @
+# *.ipynb @allendyu
+
+# All Markdown files, reviewed by @xing-yiren
+# *.md @xing-yiren
