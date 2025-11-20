@@ -25,39 +25,39 @@
         <td rowspan="3">1</td>
         <td rowspan="3">MindSpore Technical Open Courses</td>
         <td><a href="">Deep Learning: Principles and Practice with MindSpore</a></td>
-        <td>@usrname</td>
+        <td>@qhzhuang</td>
     </tr>
     <tr>
         <td><a href="https://github.com/mindspore-courses/orange-pi-mindspore">MindSpore + Orange Pi: Hands-On Large Language Model Practice</a></td>
-        <td>@usrname</td>
+        <td>@xing-yiren</td>
     </tr>
     <tr>
         <td><a href="https://github.com/mindspore-courses/step_into_llm">Step into LLM</a></td>
-        <td>@usrname</td>
+        <td>@qhzhuang</td>
     </tr>
     <tr>
         <td>2</td>
         <td>Application Examples</td>
         <td><a href="https://github.com/mindspore-courses/applications">Access the Repository</a></td>
-        <td>@usrname</td>
+        <td>@xing-yiren</td>
     </tr>
     <tr>
         <td>3</td>
         <td>Competitions</td>
         <td><a href="https://github.com/mindspore-courses/competition">Access the Repository</a></td>
-        <td>@usrname</td>
+        <td>@qhzhuang</td>
     </tr>
     <tr>
         <td>4</td>
         <td>Researches</td>
         <td></td>
-        <td>@username</td>
+        <td>@lvyufeng</td>
     </tr>
     <tr>
         <td rowspan="2">5</td>
         <td rowspan="2">Teaching Resources</td>
         <td><a href="https://e.huawei.com/cn/talent/outPage/#/sxz-course/home?courseId=K--4yKm9T9VTCjwXOw5VyL66JpI">Artificial Intelligence: Principles and Applications</a></td>
-        <td>-</td>
+        <td rowspan="2">@xing-yiren</td>
     </tr>
     <tr>
         <td><a href="https://github.com/mindspore-courses/d2l-mindspore">d2l-mindspore</a></td>
@@ -66,27 +66,27 @@
         <td>6</td>
         <td>MindSpore Developers and Developer Advoacates</td>
         <td><a href="https://www.mindspore.cn/developers/en">Apply for Certification</a></td>
-        <td>-</td>
+        <td>@xing-yiren</td>
     </tr>
 
 </table>
-
 
 ## Quick Access to MindSpore
 
 <div align=center>
   <a href="https://www.mindspore.cn/">
-    <img alt="mindspore-website" src="https://github.com/mindspore-courses/.github/blob/master/profile/mindspore-website.png" width="27%">
+    <img alt="mindspore-website" src="./images/mindspore_website_en.png" width="30%">
   </a>
   <a href="https://gitee.com/mindspore">
-    <img alt="mindspore-gitee" src="https://github.com/mindspore-courses/.github/blob/master/profile/mindspore-gitee.png" width="30%">
+    <img alt="mindspore-gitee" src="./images/mindspore_gitee_en.png" width="30%">
   </a>
   <a href="https://github.com/mindspore-lab">
-    <img alt="mindspore-lab" src="https://github.com/mindspore-courses/.github/blob/master/profile/mindspore-lab.png" width="30%">
+    <img alt="mindspore-lab" src="./images/mindspore_lab_en.png" width="30%">
   </a>
 </div>
 
 ## Join the Community
+
 <div align="center">
 
 | <img alt="wechat-assistant" src="./images/wechat_assistant.png" width="200px">| <img alt="qq-group-chat" src="./images/qq_group_chat.png" width="200px"> |
