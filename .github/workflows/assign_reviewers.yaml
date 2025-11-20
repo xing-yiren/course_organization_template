@@ -8,10 +8,16 @@ jobs:
   get-reviewers:
     runs-on: ubuntu-latest
     permissions:
-      pull-requests: write
       contents: read
-      issues: write
     steps:
+      - name: Generate GitHub App token
+        id: generate-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          installation-id: ${{ secrets.INSTALLATION_ID }}
+
       - name: Checkout code
         uses: actions/checkout@v4
         with:
@@ -21,7 +27,7 @@ jobs:
         id: modified-files
         uses: actions/github-script@v7
         with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
+          github-token: ${{ steps.generate-token.outputs.token }}
           script: |
             const { data: files } = await github.rest.pulls.listFiles({
               owner: context.repo.owner,
@@ -52,7 +58,7 @@ jobs:
 
           # Extract and normalize all rules (preserve original root path for detection)
           all_rules=$(grep -v '^#\|^$' .github/CODEOWNERS)
-          
+
           # Detect root rule using original path "/" (before normalization)
           root_owners=$(echo "$all_rules" | grep -E '^/[[:space:]]+@' | sed -E 's|^/[[:space:]]+@?||; s/[[:space:]]+$//')
           if [ -z "$root_owners" ]; then
@@ -67,7 +73,7 @@ jobs:
               # Path must be the first column and cannot contain @ (to exclude reviewers)
               path = $1;
               gsub(/^\//, "", path);  # Remove leading slash from path
-              
+
               # Extract reviewers starting from the 2nd column (only @-prefixed entries)
               owners = "";
               for(i=2; i<=NF; i++) {
@@ -100,7 +106,7 @@ jobs:
           echo -e "\nProcessing each file:"
           for file in "${modified_files[@]}"; do
             [ -z "$file" ] && continue  # Skip empty entries
-            
+
             echo -e "\n=== Processing file: $file ==="
             declare -A file_reviewers
 
@@ -146,7 +152,7 @@ jobs:
           unique_reviewers=$(echo "${!global_reviewers[@]}" | tr ' ' ',' | sed 's/^,//;s/,$//')
           echo "reviewers=$unique_reviewers" >> $GITHUB_OUTPUT
           echo -e "\nFinal reviewers: $unique_reviewers"
-      
+
       - name: Check if PAT exists
         run: |
           if [ -z "${{ secrets.REVIEWER_PAT }}" ]; then
@@ -160,7 +166,7 @@ jobs:
           steps.codeowners-parser.outputs.reviewers != ''
         uses: actions/github-script@v7
         with:
-          github-token: ${{ secrets.REVIEWER_PAT }}
+          github-token: ${{ steps.generate-token.outputs.token }}
           script: |
             // 1. Parse target reviewers list (from CODEOWNERS or other sources)
             const targetReviewers = '${{ steps.codeowners-parser.outputs.reviewers }}'.split(',').filter(r => r);
@@ -206,4 +212,5 @@ jobs:
               });
             } catch (error) {
               console.error('Error:', error.message);
+              core.error(`Failed to assign reviewers or add comment: ${error.message}`);
             }
