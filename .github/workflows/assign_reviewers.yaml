@@ -153,14 +153,6 @@ jobs:
           echo "reviewers=$unique_reviewers" >> $GITHUB_OUTPUT
           echo -e "\nFinal reviewers: $unique_reviewers"
 
-      - name: Check if PAT exists
-        run: |
-          if [ -z "${{ secrets.REVIEWER_PAT }}" ]; then
-            echo "Secret REVIEWER_PAT is not set"
-          else
-            echo "Secret REVIEWER_PAT exists"
-          fi
-
       - name: Assign reviewers and comment
         if: >
           steps.codeowners-parser.outputs.reviewers != ''
