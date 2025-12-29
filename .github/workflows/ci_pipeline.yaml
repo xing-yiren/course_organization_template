@@ -69,8 +69,8 @@ jobs:
           pylint ${{ env.PY_FILES }} --jobs=$NUM_CORES --rcfile=.github/pylint.conf
 
       - name: Skip Pylint for .py (no files)
-          if: env.PY_FILE_COUNT -eq 0
-          run: echo "✅ No .py files found, skipping Pylint for .py"
+        if: env.PY_FILE_COUNT -eq 0
+        run: echo "✅ No .py files found, skipping Pylint for .py"
 
       - name: Run Pylint for .ipynb files (via nbqa)
         if: env.IPYNB_FILE_COUNT -gt 0
