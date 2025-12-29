@@ -9,6 +9,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      pull-requests: write  # Required for assign reviewers and comments
     steps:
       - name: Generate GitHub App token
         id: generate-token
@@ -44,16 +45,18 @@ jobs:
           # Count total committers for subsequent tiered judgment
           COMMITTER_COUNT=$(echo "$ALL_COMMITTERS" | wc -w | tr -d ' ')
 
-          # Output results to environment variables
+          # 关键修复：将输出转为 JS 可直接解析的格式（重点处理带 - 的用户名）
           if [ -z "$ALL_COMMITTERS" ] || [ "$COMMITTER_COUNT" -eq 0 ]; then
             echo "No valid committers found in CODEOWNERS"
             echo "has_committers=false" >> $GITHUB_OUTPUT
-            echo "all_committers=" >> $GITHUB_OUTPUT
+            echo "all_committers=[]" >> $GITHUB_OUTPUT
             echo "committer_count=0" >> $GITHUB_OUTPUT
           else
             echo "Found $COMMITTER_COUNT committers in CODEOWNERS: $ALL_COMMITTERS"
             echo "has_committers=true" >> $GITHUB_OUTPUT
-            echo "all_committers=$ALL_COMMITTERS" >> $GITHUB_OUTPUT
+            # 修复：将每个用户名用双引号包裹，再转为 JS 数组（兼容带 -、_ 的用户名）
+            ALL_COMMITTERS_JS_ARRAY=$(echo "$ALL_COMMITTERS" | tr ' ' '\n' | awk '{print "\""$0"\""}' | tr '\n' ',' | sed 's/,$//' | sed 's/^/[/;s/$/]/')
+            echo "all_committers=$ALL_COMMITTERS_JS_ARRAY" >> $GITHUB_OUTPUT
             echo "committer_count=$COMMITTER_COUNT" >> $GITHUB_OUTPUT
           fi
 
@@ -62,23 +65,19 @@ jobs:
         with:
           github-token: ${{ steps.generate-token.outputs.token }}
           script: |
-            // ==================== 精准定位：先打印所有渲染后的变量（关键！）====================
+            // ==================== 精准定位：先打印所有渲染后的变量 ====================
             console.log("===== 变量渲染结果（用于定位语法错误） =====");
-            // 直接打印每个变量的原始值，看是否有语法问题
             console.log("prAuthor:", context.actor);
             console.log("hasCommitters (渲染后):", ${{ steps.codeowners-parser.outputs.has_committers }});
             console.log("allCommitters (渲染后):", ${{ steps.codeowners-parser.outputs.all_committers }});
             console.log("committerCount (渲染后):", ${{ steps.codeowners-parser.outputs.committer_count }});
             console.log("============================================");
 
-            // ==================== 核心逻辑：用 JS 可直接解析的变量 ====================
-            // 1. 变量定义（全部改为 JS 合法格式，避免 Unexpected token ';'）
-            const prAuthor = context.actor;
-            // 布尔值：直接渲染（已确保是 true/false，无引号）
+            // ==================== 核心逻辑：修复字符串/数组语法错误 ====================
+            // 1. 变量定义（关键：确保所有字符串/数组符合 JS 语法，兼容带 - 的用户名）
+            const prAuthor = context.actor; // context.actor 本身是 JS 字符串，无需额外处理
             const hasCommitters = ${{ steps.codeowners-parser.outputs.has_committers }};
-            // 数组：直接渲染（已确保是 ["alice","bob"] 格式，可直接解析）
             const allCommitters = ${{ steps.codeowners-parser.outputs.all_committers }};
-            // 数字：直接渲染（已确保是 0/1/2 等，无引号）
             const committerCount = ${{ steps.codeowners-parser.outputs.committer_count }};
             const prNumber = context.issue.number;
             const repoInfo = {
@@ -93,7 +92,7 @@ jobs:
               return;
             }
 
-            // 3. 三种场景逻辑（无语法错误，可正常执行）
+            // 3. 三种场景逻辑（无语法错误，兼容带 - 的用户名）
             const isAuthorCommitter = allCommitters.includes(prAuthor);
             const otherCommitters = allCommitters.filter(committer => committer !== prAuthor); // Exclude PR author
 
