@@ -22,186 +22,126 @@ jobs:
         with:
           fetch-depth: 1
 
-      - name: Get modified files in PR
-        id: modified-files
-        uses: actions/github-script@v7
-        with:
-          github-token: ${{ steps.generate-token.outputs.token }}
-          script: |
-            const { data: files } = await github.rest.pulls.listFiles({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              pull_number: context.issue.number,
-            });
-            const filePaths = files.map(f => f.filename.replace(/^\//, '')).join(';');
-            console.log('Semicolon-delimited files:', filePaths);
-            return filePaths;
-
       - name: Parse CODEOWNERS to find reviewers
         id: codeowners-parser
         run: |
+          # Check if CODEOWNERS file exists in the standard path
           if [ ! -f ".github/CODEOWNERS" ]; then
-            echo "CODEOWNERS file not found"
-            exit 1
+            echo "CODEOWNERS file not found, skipping all reviewer logic"
+            echo "has_committers=false" >> $GITHUB_OUTPUT
+            echo "all_committers=" >> $GITHUB_OUTPUT
+            exit 0
           fi
 
-          # Get semicolon-delimited files and split into array
-          modified_files_str=${{ steps.modified-files.outputs.result }}
-          IFS=';' read -ra modified_files <<< "$modified_files_str"
+          # Extract all valid @-prefixed reviewers from CODEOWNERS, deduplicate and clean format
+          ALL_COMMITTERS=$(grep -o '@[a-zA-Z0-9_-]*' .github/CODEOWNERS | \
+            sed 's/^@//' | \
+            sort | \
+            uniq | \
+            tr '\n' ' ')
 
-          # Verify split worked
-          echo "Split modified files into ${#modified_files[@]} files:"
-          for file in "${modified_files[@]}"; do
-            echo " - $file"
-          done
+          # Count total committers for subsequent tiered judgment
+          COMMITTER_COUNT=$(echo "$ALL_COMMITTERS" | wc -w | tr -d ' ')
 
-          # Extract and normalize all rules (preserve original root path for detection)
-          all_rules=$(grep -v '^#\|^$' .github/CODEOWNERS)
-
-          # Detect root rule using original path "/" (before normalization)
-          root_owners=$(echo "$all_rules" | grep -E '^/[[:space:]]+@' | sed -E 's|^/[[:space:]]+@?||; s/[[:space:]]+$//')
-          if [ -z "$root_owners" ]; then
-            echo "Error: No root directory reviewers found in CODEOWNERS (expected '/ @username')"
-            exit 1
+          # Output results to environment variables
+          if [ -z "$ALL_COMMITTERS" ] || [ "$COMMITTER_COUNT" -eq 0 ]; then
+            echo "No valid committers found in CODEOWNERS"
+            echo "has_committers=false" >> $GITHUB_OUTPUT
+            echo "all_committers=" >> $GITHUB_OUTPUT
+            echo "committer_count=0" >> $GITHUB_OUTPUT
+          else
+            echo "Found $COMMITTER_COUNT committers in CODEOWNERS: $ALL_COMMITTERS"
+            echo "has_committers=true" >> $GITHUB_OUTPUT
+            echo "all_committers=$ALL_COMMITTERS" >> $GITHUB_OUTPUT
+            echo "committer_count=$COMMITTER_COUNT" >> $GITHUB_OUTPUT
           fi
-          echo "Root reviewers (mandatory): $root_owners"
 
-          # Normalize rules (strip leading slashes) for matching
-          normalized_rules=$(echo "$all_rules" | grep -v '^/[[:space:]]' | awk '
-            {
-              # Path must be the first column and cannot contain @ (to exclude reviewers)
-              path = $1;
-              gsub(/^\//, "", path);  # Remove leading slash from path
-
-              # Extract reviewers starting from the 2nd column (only @-prefixed entries)
-              owners = "";
-              for(i=2; i<=NF; i++) {
-                if ($i ~ /^@/) {   # Only keep entries starting with @ (valid reviewers)
-                  owners = owners " " substr($i, 2);  # Remove @
-                }
-              }
-              # Only output rules with valid paths and reviewers
-              if (path != "" && owners != "") {
-                print path "|" owners;  # Use | as delimiter to separate path and owners (avoids confusion)
-              }
-            }
-          ')
-
-          echo -e "\nNormalized rules (path|owners):"
-          echo "$normalized_rules" | while IFS='|' read -r p o; do
-            echo " - Path: '$p', Owners: '$o'"
-          done
-
-          [ ${#modified_files[@]} -eq 0 ] && { echo "reviewers=" >> $GITHUB_OUTPUT; exit 0; }
-
-          # Associative array to store all unique reviewers across files
-          declare -A global_reviewers
-
-          for owner in $root_owners; do
-            clean_owner=$(echo "$owner" | sed 's/^@//')
-            global_reviewers["$clean_owner"]=1
-          done
-
-          echo -e "\nProcessing each file:"
-          for file in "${modified_files[@]}"; do
-            [ -z "$file" ] && continue  # Skip empty entries
-
-            echo -e "\n=== Processing file: $file ==="
-            declare -A file_reviewers
-
-            # Check all rules against current file
-            while IFS='|' read -r path owners; do
-
-              if [ -z "$path" ] || [ -z "$owners" ]; then
-                echo "[Debug] Skipping invalid rule: path='$path', owners='$owners'"
-                continue
-              fi
-
-              echo "Checking rule: path='$path', owners='$owners'"
-
-              # Match suffix wildcards (e.g., *.md)
-              if [[ "$path" == *"*."* ]]; then
-                suffix="${path#*.}"
-                if [[ "$file" == *."$suffix" ]]; then
-                  echo "✓ Matched suffix rule"
-                  for owner in $owners; do
-                    file_reviewers["$owner"]=1
-                  done
-                fi
-              # Match path rules (directories)
-              else
-                if [[ "$file" == "$path" || "$file" == "${path}"* ]]; then
-                  echo "✓ Matched path rule"
-                  for owner in $owners; do
-                    file_reviewers["$owner"]=1
-                  done
-                fi
-              fi
-            done <<< "$normalized_rules"
-
-            # Merge to global reviewers
-            echo "Reviewers for $file: ${!file_reviewers[@]}"
-            for owner in "${!file_reviewers[@]}"; do
-              global_reviewers["$owner"]=1
-            done
-            unset file_reviewers
-          done
-
-          # Generate final list
-          unique_reviewers=$(echo "${!global_reviewers[@]}" | tr ' ' ',' | sed 's/^,//;s/,$//')
-          echo "reviewers=$unique_reviewers" >> $GITHUB_OUTPUT
-          echo -e "\nFinal reviewers: $unique_reviewers"
-
-      - name: Assign reviewers and comment
-        if: >
-          steps.codeowners-parser.outputs.reviewers != ''
+      - name: Tiered logic for assigning reviewers and commenting
         uses: actions/github-script@v7
         with:
           github-token: ${{ steps.generate-token.outputs.token }}
           script: |
-            // 1. Parse target reviewers list (from CODEOWNERS or other sources)
-            const targetReviewers = '${{ steps.codeowners-parser.outputs.reviewers }}'.split(',').filter(r => r);
-            if (targetReviewers.length === 0) {
-              console.log("No target reviewers found, skipping.");
-              return;
-            }
-            console.log("Target reviewers:", targetReviewers);
+            // 1. Get core data from context and previous step outputs
+            const prAuthor = context.actor;
+            const hasCommitters = ${{ steps.extract-committers.outputs.has_committers }};
+            const allCommitters = '${{ steps.extract-committers.outputs.all_committers }}'.split(' ').filter(r => r.trim());
+            const committerCount = ${{ steps.extract-committers.outputs.committer_count }};
             const prNumber = context.issue.number;
-
-            // 2. Fetch currently assigned reviewers for the PR
-            const { data: currentReviews } = await github.rest.pulls.listRequestedReviewers({
+            const repoInfo = {
               owner: context.repo.owner,
               repo: context.repo.repo,
               pull_number: prNumber
-            });
-            const currentReviewers = currentReviews.users.map(user => user.login);  // Extract usernames
-            console.log("Current assigned reviewers:", currentReviewers);
+            };
 
-            // 3. Check if all target reviewers are already assigned
-            const allAssigned = targetReviewers.every(reviewer => currentReviewers.includes(reviewer));
-
-            if (allAssigned) {
-              console.log("All target reviewers are already assigned. Skipping.");
+            // 2. Skip all logic if no valid committers exist in CODEOWNERS
+            if (!hasCommitters || allCommitters.length === 0 || committerCount === 0) {
+              console.log("No valid committers found in CODEOWNERS, exiting process.");
               return;
             }
 
-            // 4. Assign missing reviewers and add comment
-            const missingReviewers = targetReviewers.filter(r => !currentReviewers.includes(r));
-            try {
-              await github.rest.pulls.requestReviewers({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                pull_number: prNumber,
-                reviewers: missingReviewers
-              });
-              const commentReviewers = targetReviewers.map(r => `@${r}`).join(' ');
-              await github.rest.issues.createComment({
-                issue_number: prNumber,
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                body: `This PR needs review. Please take a look, ${commentReviewers}, and feel free to invite another committer to review as well.`
-              });
-            } catch (error) {
-              console.error('Error:', error.message);
-              core.error(`Failed to assign reviewers or add comment: ${error.message}`);
+            // 3. Classify the three scenarios and execute corresponding logic
+            const isAuthorCommitter = allCommitters.includes(prAuthor);
+            const otherCommitters = allCommitters.filter(committer => committer !== prAuthor); // Exclude PR author
+
+            // Scenario 1: PR author is NOT a committer - assign all committers and remind
+            if (!isAuthorCommitter) {
+              console.log(`Scenario 1: PR author (${prAuthor}) is not a repo committer, assigning all committers.`);
+              try {
+                // Assign all committers as reviewers
+                await github.rest.pulls.requestReviewers({
+                  ...repoInfo,
+                  reviewers: allCommitters
+                });
+
+                // Post comment to remind reviewers
+                const reviewerMentions = allCommitters.map(c => `@${c}`).join(' ');
+                await github.rest.issues.createComment({
+                  ...repoInfo,
+                  issue_number: prNumber,
+                  body: `🔔 This PR needs your review: ${reviewerMentions}\nPlease review the code changes at your earliest convenience, and feel free to invite another committer to review as well.`
+                });
+                console.log("Successfully assigned all committers and posted reminder comment.");
+              } catch (error) {
+                console.error("Error in Scenario 1 (assign all committers):", error.message);
+                core.error(`Failed to execute Scenario 1 logic: ${error.message}`);
+              }
+            }
+            // Scenario 2: PR author is a committer, and there are other committers - assign other committers
+            else if (isAuthorCommitter && otherCommitters.length > 0) {
+              console.log(`Scenario 2: PR author (${prAuthor}) is a committer, assigning other ${otherCommitters.length} committers.`);
+              try {
+                // Assign other committers (exclude PR author)
+                await github.rest.pulls.requestReviewers({
+                  ...repoInfo,
+                  reviewers: otherCommitters
+                });
+
+                // Post comment to remind other reviewers
+                const otherReviewerMentions = otherCommitters.map(c => `@${c}`).join(' ');
+                await github.rest.issues.createComment({
+                  ...repoInfo,
+                  issue_number: prNumber,
+                  body: `🔔 This PR needs your review: ${reviewerMentions}\nPlease review the code changes at your earliest convenience, and feel free to invite another committer to review as well.`
+                });
+                console.log("Successfully assigned other committers and posted reminder comment.");
+              } catch (error) {
+                console.error("Error in Scenario 2 (assign other committers):", error.message);
+                core.error(`Failed to execute Scenario 2 logic: ${error.message}`);
+              }
+            }
+            // Scenario 3: PR author is the ONLY committer - no assignment, remind author to manually assign
+            else {
+              console.log(`Scenario 3: PR author (${prAuthor}) is the only repo committer, posting manual assignment reminder.`);
+              try {
+                // Post comment to remind PR author to manually assign reviewers
+                await github.rest.issues.createComment({
+                  ...repoInfo,
+                  issue_number: prNumber,
+                  body: `⚠️ Reminder for @${prAuthor}\nYou are the only repository committer, and PR author cannot review your own PR.\nPlease manually assign valid reviewers to complete the review process.`
+                });
+                console.log("Successfully posted manual assignment reminder to PR author.");
+              } catch (error) {
+                console.error("Error in Scenario 3 (remind manual assignment):", error.message);
+                core.error(`Failed to execute Scenario 3 logic: ${error.message}`);
+              }
             }

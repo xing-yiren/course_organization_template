@@ -10,9 +10,9 @@ body:
     options:
     - label: 1. I have searched related issues but cannot get the expected help.
     - label: 2. The bug has not been fixed in the latest version.
-    - label: 3. I have read [Contributing Guidlines](https://github.com/xing-yiren/course_organization_template/wiki/%F0%9F%A7%AD-Contributing-Guidelines:-Issues-&-Pull-Requests).
+    - label: 3. I have read [Contributing Guidlines](https://github.com/mindspore-lab/applications/wiki/Contributing-Guidelines).
     - label: 4. Please note that if the bug-related issue you submitted lacks corresponding environment info and a minimal reproducible demo, it will be challenging for us to reproduce and resolve the issue, reducing the likelihood of receiving feedback.
-    - label: 5. If the issue you raised is not a bug but a question, please raise a discussion at [Discussions](https://github.com/xing-yiren/course_organization_template/discussions/new/choose) Otherwise, it will be closed.
+    - label: 5. If the issue you raised is not a bug but a question, please raise a discussion at Discussions. Otherwise, it will be closed.
 - type: textarea
   attributes:
     label: Describe the bug
@@ -41,7 +41,7 @@ body:
       - label: Ascend
       - label: GPU
       - label: CPU
-  validations: 
+  validations:
     required: true
 - type: input
   attributes:
