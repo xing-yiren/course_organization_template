@@ -10,6 +10,9 @@ jobs:
     permissions:
       contents: read
       pull-requests: write  # Required for assign reviewers and comments
+    env:
+      # 提前定义环境变量，避免直接在 JS 中渲染复杂变量
+      CODEOWNERS_PATH: ".github/CODEOWNERS"
     steps:
       - name: Generate GitHub App token
         id: generate-token
@@ -23,81 +26,68 @@ jobs:
         with:
           fetch-depth: 1
 
-      - name: Parse CODEOWNERS to find reviewers
+      - name: Parse CODEOWNERS to find reviewers (output as string only)
         id: codeowners-parser
         run: |
-          # Check if CODEOWNERS file exists in the standard path
-          if [ ! -f ".github/CODEOWNERS" ]; then
+          # Step 1: Check if CODEOWNERS exists
+          if [ ! -f "$CODEOWNERS_PATH" ]; then
             echo "CODEOWNERS file not found, skipping all reviewer logic"
-            echo "has_committers=false" >> $GITHUB_OUTPUT
-            echo "all_committers=[]" >> $GITHUB_OUTPUT
-            echo "committer_count=0" >> $GITHUB_OUTPUT
+            echo "has_committers_str=false" >> $GITHUB_OUTPUT
+            echo "all_committers_str=" >> $GITHUB_OUTPUT
+            echo "committer_count_str=0" >> $GITHUB_OUTPUT
             exit 0
           fi
 
-          # Extract all valid @-prefixed reviewers from CODEOWNERS, deduplicate and clean format
-          # 关键修复 1：过滤空行、仅保留有效用户名（排除纯空白）
-          ALL_COMMITTERS=$(grep -o '@[a-zA-Z0-9_-]*' .github/CODEOWNERS | \
+          # Step 2: Extract valid committers (filter empty values strictly)
+          ALL_COMMITTERS=$(grep -o '@[a-zA-Z0-9_-]*' "$CODEOWNERS_PATH" | \
             sed 's/^@//' | \
             sort | \
             uniq | \
-            grep -v '^$' |  # 过滤空字符串（核心：移除纯空白行）
+            grep -v '^$' | \
             tr '\n' ' ')
 
-          # 关键修复 2：再次清理，移除首尾空格、压缩中间多余空格（避免产生空值）
+          # Step 3: Clean up committer string (remove extra spaces)
           ALL_COMMITTERS=$(echo "$ALL_COMMITTERS" | sed 's/^[ \t]*//;s/[ \t]*$//;s/[ \t]+/ /g')
 
-          # Count total committers for subsequent tiered judgment (仅统计非空有效用户名)
-          COMMITTER_COUNT=$(echo "$ALL_COMMITTERS" | wc -w | tr -d ' ')
-          # 兜底：若为空，强制计数为 0
-          if [ -z "$ALL_COMMITTERS" ]; then
-            COMMITTER_COUNT=0
+          # Step 4: Count valid committers
+          COMMITTER_COUNT=0
+          if [ -n "$ALL_COMMITTERS" ]; then
+            COMMITTER_COUNT=$(echo "$ALL_COMMITTERS" | wc -w | tr -d ' ')
           fi
 
-          # 关键修复 3：生成 JS 数组时，再次过滤空值，确保无 '' 元素
-          if [ -z "$ALL_COMMITTERS" ] || [ "$COMMITTER_COUNT" -eq 0 ]; then
-            echo "No valid committers found in CODEOWNERS"
-            echo "has_committers=false" >> $GITHUB_OUTPUT
-            echo "all_committers=[]" >> $GITHUB_OUTPUT
-            echo "committer_count=0" >> $GITHUB_OUTPUT
-          else
-            echo "Found $COMMITTER_COUNT committers in CODEOWNERS: $ALL_COMMITTERS"
-            echo "has_committers=true" >> $GITHUB_OUTPUT
-            # 生成 JS 数组：先过滤空值，再包裹引号（确保无 ''）
-            ALL_COMMITTERS_JS_ARRAY=$(echo "$ALL_COMMITTERS" | \
-              tr ' ' '\n' | \
-              grep -v '^$' | \  # 再次过滤空行，杜绝 '' 出现
-              awk '{print "\""$0"\""}' | \
-              tr '\n' ',' | \
-              sed 's/,$//' | \
-              sed 's/^/[/;s/$/]/')
-            # 兜底：若数组为空，强制设为 []
-            if [ "$ALL_COMMITTERS_JS_ARRAY" = "[]" ] && [ "$COMMITTER_COUNT" -gt 0 ]; then
-              ALL_COMMITTERS_JS_ARRAY="[\"$ALL_COMMITTERS\"]"
-            fi
-            echo "all_committers=$ALL_COMMITTERS_JS_ARRAY" >> $GITHUB_OUTPUT
-            echo "committer_count=$COMMITTER_COUNT" >> $GITHUB_OUTPUT
-          fi
+          # Step 5: Output ALL as STRING (critical: no direct JS format, avoid rendering errors)
+          echo "has_committers_str=$(if [ $COMMITTER_COUNT -gt 0 ]; then echo "true"; else echo "false"; fi)" >> $GITHUB_OUTPUT
+          echo "all_committers_str=$ALL_COMMITTERS" >> $GITHUB_OUTPUT
+          echo "committer_count_str=$COMMITTER_COUNT" >> $GITHUB_OUTPUT
+
+          # Log for verification
+          echo "===== Shell Step Output (String Only) ====="
+          echo "has_committers_str: $(if [ $COMMITTER_COUNT -gt 0 ]; then echo "true"; else echo "false"; fi)"
+          echo "all_committers_str: $ALL_COMMITTERS"
+          echo "committer_count_str: $COMMITTER_COUNT"
+          echo "==========================================="
 
       - name: Tiered logic for assigning reviewers and commenting
         uses: actions/github-script@v7
         with:
           github-token: ${{ steps.generate-token.outputs.token }}
+          # 关键：将所有步骤输出作为环境变量传递，而非直接注入 JS 脚本
+          env:
+            HAS_COMMITTERS_STR: ${{ steps.codeowners-parser.outputs.has_committers_str }}
+            ALL_COMMITTERS_STR: ${{ steps.codeowners-parser.outputs.all_committers_str }}
+            COMMITTER_COUNT_STR: ${{ steps.codeowners-parser.outputs.committer_count_str }}
           script: |
-            // ==================== 精准定位：先打印所有渲染后的变量 ====================
-            console.log("===== 变量渲染结果（用于定位语法错误） =====");
-            console.log("prAuthor:", context.actor);
-            console.log("hasCommitters (渲染后):", ${{ steps.codeowners-parser.outputs.has_committers }});
-            console.log("allCommitters (渲染后):", ${{ steps.codeowners-parser.outputs.all_committers }});
-            console.log("committerCount (渲染后):", ${{ steps.codeowners-parser.outputs.committer_count }});
-            console.log("============================================");
-
-            // ==================== 核心逻辑：修复场景判断 + 过滤空值 ====================
-            // 1. 变量定义
+            // ==================== 核心：手动解析环境变量为合法 JS 格式（杜绝语法错误） ====================
+            console.log("===== Env Var Parsing (For Syntax Safety) =====");
+            // 1. Parse boolean (safe, no direct injection)
+            const hasCommitters = process.env.HAS_COMMITTERS_STR === "true";
+            // 2. Parse array (from space-separated string, filter empty values strictly)
+            const allCommittersStr = process.env.ALL_COMMITTERS_STR || "";
+            const allCommitters = allCommittersStr.split(' ').filter(committer => committer.trim() !== '');
+            // 3. Parse number (safe, no NaN)
+            const committerCount = parseInt(process.env.COMMITTER_COUNT_STR || "0", 10) || 0;
+            // 4. Other safe variables (no injection)
             const prAuthor = context.actor;
-            const hasCommitters = ${{ steps.codeowners-parser.outputs.has_committers }};
-            const allCommitters = ${{ steps.codeowners-parser.outputs.all_committers }};
-            const committerCount = ${{ steps.codeowners-parser.outputs.committer_count }};
             const prNumber = context.issue.number;
             const repoInfo = {
               owner: context.repo.owner,
@@ -105,33 +95,34 @@ jobs:
               pull_number: prNumber
             };
 
-            // 2. 跳过所有逻辑（若无有效 committer）
+            // Log parsed results (verify no syntax errors)
+            console.log("prAuthor:", prAuthor);
+            console.log("hasCommitters:", hasCommitters);
+            console.log("allCommitters (parsed):", allCommitters);
+            console.log("committerCount (parsed):", committerCount);
+            console.log("=============================================");
+
+            // ==================== 跳过逻辑（无有效 committer） ====================
             if (!hasCommitters || allCommitters.length === 0 || committerCount === 0) {
               console.log("No valid committers found in CODEOWNERS, exiting process.");
               return;
             }
 
-            // 3. 关键修复 4：过滤数组中的空字符串（兜底，防止前端仍出现 ''）
-            const validAllCommitters = allCommitters.filter(committer => committer.trim() !== '');
-            console.log("Valid committers after filtering empty strings:", validAllCommitters);
+            // ==================== 三种场景逻辑（精准无误差） ====================
+            const isAuthorCommitter = allCommitters.includes(prAuthor);
+            const otherCommitters = allCommitters.filter(committer => committer !== prAuthor);
+            const isOnlyAuthorCommitter = isAuthorCommitter && allCommitters.length === 1;
 
-            // 4. 三种场景逻辑（强化判断，确保精准）
-            const isAuthorCommitter = validAllCommitters.includes(prAuthor);
-            // 关键修复 5：过滤空值后，再排除 PR 作者（确保 otherCommitters 无 ''）
-            const otherCommitters = validAllCommitters.filter(committer => committer !== prAuthor && committer.trim() !== '');
-            // 关键修复 6：场景判断基于「有效用户名计数」，而非数组长度（更精准）
-            const isOnlyAuthorCommitter = isAuthorCommitter && validAllCommitters.length === 1;
-
-            // Scenario 1: PR author is NOT a committer - assign all committers and remind
+            // Scenario 1: PR author is NOT a committer
             if (!isAuthorCommitter) {
               console.log(`Scenario 1: PR author (${prAuthor}) is not a repo committer, assigning all committers.`);
               try {
                 await github.rest.pulls.requestReviewers({
                   ...repoInfo,
-                  reviewers: validAllCommitters
+                  reviewers: allCommitters
                 });
 
-                const reviewerMentions = validAllCommitters.map(c => `@${c}`).join(' ');
+                const reviewerMentions = allCommitters.map(c => `@${c}`).join(' ');
                 await github.rest.issues.createComment({
                   owner: context.repo.owner,
                   repo: context.repo.repo,
@@ -144,7 +135,7 @@ jobs:
                 core.error(`Failed to execute Scenario 1 logic: ${error.message}`);
               }
             }
-            // Scenario 2: PR author is a committer, and there are OTHER VALID committers
+            // Scenario 2: PR author is a committer with other valid committers
             else if (isAuthorCommitter && !isOnlyAuthorCommitter && otherCommitters.length > 0) {
               console.log(`Scenario 2: PR author (${prAuthor}) is a committer, assigning other ${otherCommitters.length} committers.`);
               try {
@@ -166,7 +157,7 @@ jobs:
                 core.error(`Failed to execute Scenario 2 logic: ${error.message}`);
               }
             }
-            // Scenario 3: PR author is the ONLY VALID committer (精准匹配，不再误判)
+            // Scenario 3: PR author is the ONLY valid committer (no more misjudgment)
             else if (isOnlyAuthorCommitter) {
               console.log(`Scenario 3: PR author (${prAuthor}) is the only repo committer, posting manual assignment reminder.`);
               try {
