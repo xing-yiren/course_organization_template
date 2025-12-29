@@ -62,25 +62,25 @@ jobs:
           echo "============================"
 
       - name: Run Pylint for .py files
-        if: ${{ env.PY_FILE_COUNT > 0 }}
+        if: ${{ env.PY_FILE_COUNT > 0 }}  # 修复：-gt → >（大于）
         run: |
           NUM_CORES=$(nproc)
           echo "Running Pylint on $PY_FILE_COUNT .py files..."
           pylint ${{ env.PY_FILES }} --jobs=$NUM_CORES --rcfile=.github/pylint.conf
 
       - name: Skip Pylint for .py (no files)
-        if: ${{ env.PY_FILE_COUNT == 0 }}
+        if: ${{ env.PY_FILE_COUNT == 0 }}  # 修复：-eq → ==（等于）
         run: echo "✅ No .py files found, skipping Pylint for .py"
 
       - name: Run Pylint for .ipynb files (via nbqa)
-        if: ${{ env.IPYNB_FILE_COUNT > 0 }}
+        if: ${{ env.IPYNB_FILE_COUNT > 0 }}  # 修复：-gt → >（大于）
         run: |
           NUM_CORES=$(nproc)
           echo "Running Pylint on $IPYNB_FILE_COUNT .ipynb files..."
           nbqa pylint ${{ env.IPYNB_FILES }} --jobs=$NUM_CORES --rcfile=.github/pylint.conf
 
       - name: Skip Pylint for .ipynb (no files)
-        if: ${{ env.IPYNB_FILE_COUNT == 0 }}
+        if: ${{ env.IPYNB_FILE_COUNT == 0 }}  # 修复：-eq → ==（等于）
         run: echo "✅ No .ipynb files found, skipping Pylint for .ipynb"
 
   markdownlint-check:
