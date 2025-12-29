@@ -36,16 +36,25 @@ jobs:
           fi
 
           # Extract all valid @-prefixed reviewers from CODEOWNERS, deduplicate and clean format
+          # 关键修复 1：过滤空行、仅保留有效用户名（排除纯空白）
           ALL_COMMITTERS=$(grep -o '@[a-zA-Z0-9_-]*' .github/CODEOWNERS | \
             sed 's/^@//' | \
             sort | \
             uniq | \
+            grep -v '^$' |  # 过滤空字符串（核心：移除纯空白行）
             tr '\n' ' ')
 
-          # Count total committers for subsequent tiered judgment
-          COMMITTER_COUNT=$(echo "$ALL_COMMITTERS" | wc -w | tr -d ' ')
+          # 关键修复 2：再次清理，移除首尾空格、压缩中间多余空格（避免产生空值）
+          ALL_COMMITTERS=$(echo "$ALL_COMMITTERS" | sed 's/^[ \t]*//;s/[ \t]*$//;s/[ \t]+/ /g')
 
-          # 关键修复：将输出转为 JS 可直接解析的格式（重点处理带 - 的用户名）
+          # Count total committers for subsequent tiered judgment (仅统计非空有效用户名)
+          COMMITTER_COUNT=$(echo "$ALL_COMMITTERS" | wc -w | tr -d ' ')
+          # 兜底：若为空，强制计数为 0
+          if [ -z "$ALL_COMMITTERS" ]; then
+            COMMITTER_COUNT=0
+          fi
+
+          # 关键修复 3：生成 JS 数组时，再次过滤空值，确保无 '' 元素
           if [ -z "$ALL_COMMITTERS" ] || [ "$COMMITTER_COUNT" -eq 0 ]; then
             echo "No valid committers found in CODEOWNERS"
             echo "has_committers=false" >> $GITHUB_OUTPUT
@@ -54,8 +63,18 @@ jobs:
           else
             echo "Found $COMMITTER_COUNT committers in CODEOWNERS: $ALL_COMMITTERS"
             echo "has_committers=true" >> $GITHUB_OUTPUT
-            # 修复：将每个用户名用双引号包裹，再转为 JS 数组（兼容带 -、_ 的用户名）
-            ALL_COMMITTERS_JS_ARRAY=$(echo "$ALL_COMMITTERS" | tr ' ' '\n' | awk '{print "\""$0"\""}' | tr '\n' ',' | sed 's/,$//' | sed 's/^/[/;s/$/]/')
+            # 生成 JS 数组：先过滤空值，再包裹引号（确保无 ''）
+            ALL_COMMITTERS_JS_ARRAY=$(echo "$ALL_COMMITTERS" | \
+              tr ' ' '\n' | \
+              grep -v '^$' | \  # 再次过滤空行，杜绝 '' 出现
+              awk '{print "\""$0"\""}' | \
+              tr '\n' ',' | \
+              sed 's/,$//' | \
+              sed 's/^/[/;s/$/]/')
+            # 兜底：若数组为空，强制设为 []
+            if [ "$ALL_COMMITTERS_JS_ARRAY" = "[]" ] && [ "$COMMITTER_COUNT" -gt 0 ]; then
+              ALL_COMMITTERS_JS_ARRAY="[\"$ALL_COMMITTERS\"]"
+            fi
             echo "all_committers=$ALL_COMMITTERS_JS_ARRAY" >> $GITHUB_OUTPUT
             echo "committer_count=$COMMITTER_COUNT" >> $GITHUB_OUTPUT
           fi
@@ -73,9 +92,9 @@ jobs:
             console.log("committerCount (渲染后):", ${{ steps.codeowners-parser.outputs.committer_count }});
             console.log("============================================");
 
-            // ==================== 核心逻辑：修复字符串/数组语法错误 ====================
-            // 1. 变量定义（关键：确保所有字符串/数组符合 JS 语法，兼容带 - 的用户名）
-            const prAuthor = context.actor; // context.actor 本身是 JS 字符串，无需额外处理
+            // ==================== 核心逻辑：修复场景判断 + 过滤空值 ====================
+            // 1. 变量定义
+            const prAuthor = context.actor;
             const hasCommitters = ${{ steps.codeowners-parser.outputs.has_committers }};
             const allCommitters = ${{ steps.codeowners-parser.outputs.all_committers }};
             const committerCount = ${{ steps.codeowners-parser.outputs.committer_count }};
@@ -92,9 +111,16 @@ jobs:
               return;
             }
 
-            // 3. 三种场景逻辑（无语法错误，兼容带 - 的用户名）
-            const isAuthorCommitter = allCommitters.includes(prAuthor);
-            const otherCommitters = allCommitters.filter(committer => committer !== prAuthor); // Exclude PR author
+            // 3. 关键修复 4：过滤数组中的空字符串（兜底，防止前端仍出现 ''）
+            const validAllCommitters = allCommitters.filter(committer => committer.trim() !== '');
+            console.log("Valid committers after filtering empty strings:", validAllCommitters);
+
+            // 4. 三种场景逻辑（强化判断，确保精准）
+            const isAuthorCommitter = validAllCommitters.includes(prAuthor);
+            // 关键修复 5：过滤空值后，再排除 PR 作者（确保 otherCommitters 无 ''）
+            const otherCommitters = validAllCommitters.filter(committer => committer !== prAuthor && committer.trim() !== '');
+            // 关键修复 6：场景判断基于「有效用户名计数」，而非数组长度（更精准）
+            const isOnlyAuthorCommitter = isAuthorCommitter && validAllCommitters.length === 1;
 
             // Scenario 1: PR author is NOT a committer - assign all committers and remind
             if (!isAuthorCommitter) {
@@ -102,10 +128,10 @@ jobs:
               try {
                 await github.rest.pulls.requestReviewers({
                   ...repoInfo,
-                  reviewers: allCommitters
+                  reviewers: validAllCommitters
                 });
 
-                const reviewerMentions = allCommitters.map(c => `@${c}`).join(' ');
+                const reviewerMentions = validAllCommitters.map(c => `@${c}`).join(' ');
                 await github.rest.issues.createComment({
                   owner: context.repo.owner,
                   repo: context.repo.repo,
@@ -118,8 +144,8 @@ jobs:
                 core.error(`Failed to execute Scenario 1 logic: ${error.message}`);
               }
             }
-            // Scenario 2: PR author is a committer, and there are other committers
-            else if (isAuthorCommitter && otherCommitters.length > 0) {
+            // Scenario 2: PR author is a committer, and there are OTHER VALID committers
+            else if (isAuthorCommitter && !isOnlyAuthorCommitter && otherCommitters.length > 0) {
               console.log(`Scenario 2: PR author (${prAuthor}) is a committer, assigning other ${otherCommitters.length} committers.`);
               try {
                 await github.rest.pulls.requestReviewers({
@@ -140,8 +166,8 @@ jobs:
                 core.error(`Failed to execute Scenario 2 logic: ${error.message}`);
               }
             }
-            // Scenario 3: PR author is the ONLY committer
-            else {
+            // Scenario 3: PR author is the ONLY VALID committer (精准匹配，不再误判)
+            else if (isOnlyAuthorCommitter) {
               console.log(`Scenario 3: PR author (${prAuthor}) is the only repo committer, posting manual assignment reminder.`);
               try {
                 await github.rest.issues.createComment({
