@@ -30,6 +30,7 @@ jobs:
             echo "CODEOWNERS file not found, skipping all reviewer logic"
             echo "has_committers=false" >> $GITHUB_OUTPUT
             echo "all_committers=" >> $GITHUB_OUTPUT
+            echo "committer_count=0" >> $GITHUB_OUTPUT
             exit 0
           fi
 
@@ -61,11 +62,11 @@ jobs:
         with:
           github-token: ${{ steps.generate-token.outputs.token }}
           script: |
-            // 1. Get core data from context and previous step outputs
+            // 1. Get core data from context and previous step outputs (Fixed: Correct step ID to codeowners-parser)
             const prAuthor = context.actor;
-            const hasCommitters = ${{ steps.extract-committers.outputs.has_committers }};
-            const allCommitters = '${{ steps.extract-committers.outputs.all_committers }}'.split(' ').filter(r => r.trim());
-            const committerCount = ${{ steps.extract-committers.outputs.committer_count }};
+            const hasCommitters = ${{ steps.codeowners-parser.outputs.has_committers }};
+            const allCommitters = '${{ steps.codeowners-parser.outputs.all_committers }}'.split(' ').filter(r => r.trim());
+            const committerCount = ${{ steps.codeowners-parser.outputs.committer_count }};
             const prNumber = context.issue.number;
             const repoInfo = {
               owner: context.repo.owner,
@@ -96,7 +97,8 @@ jobs:
                 // Post comment to remind reviewers
                 const reviewerMentions = allCommitters.map(c => `@${c}`).join(' ');
                 await github.rest.issues.createComment({
-                  ...repoInfo,
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
                   issue_number: prNumber,
                   body: `🔔 This PR needs your review: ${reviewerMentions}\nPlease review the code changes at your earliest convenience, and feel free to invite another committer to review as well.`
                 });
@@ -116,12 +118,13 @@ jobs:
                   reviewers: otherCommitters
                 });
 
-                // Post comment to remind other reviewers
+                // Post comment to remind other reviewers (Fixed: Use otherReviewerMentions instead of reviewerMentions)
                 const otherReviewerMentions = otherCommitters.map(c => `@${c}`).join(' ');
                 await github.rest.issues.createComment({
-                  ...repoInfo,
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
                   issue_number: prNumber,
-                  body: `🔔 This PR needs your review: ${reviewerMentions}\nPlease review the code changes at your earliest convenience, and feel free to invite another committer to review as well.`
+                  body: `🔔 This PR needs your review: ${otherReviewerMentions}\nPR author (@${prAuthor}) is a repo committer and has been excluded from automatic assignment. Please review the code changes at your earliest convenience.`
                 });
                 console.log("Successfully assigned other committers and posted reminder comment.");
               } catch (error) {
@@ -135,7 +138,8 @@ jobs:
               try {
                 // Post comment to remind PR author to manually assign reviewers
                 await github.rest.issues.createComment({
-                  ...repoInfo,
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
                   issue_number: prNumber,
                   body: `⚠️ Reminder for @${prAuthor}\nYou are the only repository committer, and PR author cannot review your own PR.\nPlease manually assign valid reviewers to complete the review process.`
                 });
