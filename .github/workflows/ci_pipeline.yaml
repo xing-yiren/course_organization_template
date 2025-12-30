@@ -169,13 +169,35 @@ jobs:
             export LC_ALL=en_US.UTF-8
             export LANG=en_US.UTF-8
 
+            # 新增：初始化统计变量
+            total_ipynb=0
+            success_extract=0
+            failed_extract=0
+            skipped_extract=0
+            failed_files_list=""
+
             mkdir -p temp_md
+            echo "===== 开始提取 .ipynb 文件中的 Markdown ====="
             find . -name "*.ipynb" | while IFS= read -r nb; do
+              # 新增：文件计数 + 打印当前处理文件
+              total_ipynb=$((total_ipynb + 1))
+              echo "----------------------------------------"
+              echo "正在处理文件 [$total_ipynb]: $nb"
+
+              # 新增：校验文件是否存在且可读
+              if [ ! -f "$nb" ] || [ ! -r "$nb" ]; then
+                echo "⚠️  文件不存在或不可读，跳过：$nb"
+                skipped_extract=$((skipped_extract + 1))
+                continue
+              fi
+
+              # 原有路径处理逻辑
               nb_relpath=$(realpath --relative-to=. "$nb")
               temp_md_path="temp_md/${nb_relpath%.ipynb}.md"
               mkdir -p "$(dirname "$temp_md_path")"
+              echo "目标 MD 文件：$temp_md_path"
 
-              # 核心修改：实现「单元格内1:1还原、单元格间单空行分隔」，兼容 markdownlint
+              # 核心修改：1. 增加 jq 容错 2. 捕获解析错误 3. 分步输出
               jq -r '
                 .cells[]?  # 容错：忽略不存在的 cells 字段，避免空值报错
                 | select(.cell_type == "markdown")  # 筛选 markdown 单元格
@@ -186,7 +208,7 @@ jobs:
                     | map(.)  # 保留数组所有元素（包括空行、换行，实现单元格内1:1还原）
                     | join("")  # 按原始顺序拼接，不修改单元格内任何格式
                   ) + "###CELL_BOUNDARY###"  # 添加纯文本单元格分隔符，jq 无编译报错
-              ' "$nb" | \
+              ' "$nb" 2> "./temp_md/${nb_relpath%.ipynb}.jq_error" | \
                 awk '
                   BEGIN {
                     RS = "###CELL_BOUNDARY###"  # 以分隔符分割独立单元格
@@ -208,9 +230,39 @@ jobs:
                     }
                   }
                 ' | \
-                sed -e '/^\n\{2,\}/D' > "$temp_md_path"  # 过滤连续多空行，优化格式
+                sed -e '/^\n\{2,\}/D' > "$temp_md_path"
 
+              # 新增：检查 jq 执行结果，判断提取是否成功
+              jq_exit_code=${PIPESTATUS[0]}
+              if [ $jq_exit_code -eq 0 ] && [ -s "$temp_md_path" ]; then
+                # 提取成功且 MD 文件非空
+                echo "✅  提取成功：$nb → $temp_md_path"
+                success_extract=$((success_extract + 1))
+                # 清理 jq 错误日志（无错误时）
+                rm -f "./temp_md/${nb_relpath%.ipynb}.jq_error"
+              else
+                # 提取失败或 MD 文件为空
+                echo "❌  提取失败：$nb（jq 退出码：$jq_exit_code，MD 文件可能为空）"
+                failed_extract=$((failed_extract + 1))
+                failed_files_list+="$nb; "
+                # 保留错误日志供排查
+                if [ -f "./temp_md/${nb_relpath%.ipynb}.jq_error" ]; then
+                  echo "    错误详情：查看 ./temp_md/${nb_relpath%.ipynb}.jq_error"
+                fi
+              fi
             done
+
+            # 新增：提取完成汇总统计
+            echo "======================================"
+            echo "===== .ipynb Markdown 提取汇总 ====="
+            echo "总扫描 .ipynb 文件数：$total_ipynb"
+            echo "✅  提取成功数：$success_extract"
+            echo "❌  提取失败数：$failed_extract"
+            echo "⚠️  跳过文件数：$skipped_extract"
+            if [ $failed_extract -gt 0 ]; then
+              echo "失败文件列表：${failed_files_list%;; }"
+            fi
+            echo "======================================"
 
         - name: Run markdownlint
           uses: DavidAnson/markdownlint-cli2-action@v15
