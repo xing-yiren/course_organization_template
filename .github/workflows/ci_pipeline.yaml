@@ -161,44 +161,62 @@ jobs:
       steps:
         - name: Checkout Code
           uses: actions/checkout@v4
+          with:
+            fetch-depth: 1
 
         - name: Extract Markdown from .ipynb files
           id: extract_md
           run: |
-            # 新增：确保环境支持 UTF-8 编码，避免中文乱码
             export LC_ALL=en_US.UTF-8
             export LANG=en_US.UTF-8
 
-            mkdir -p temp_md
-            find . -name "*.ipynb" | while IFS= read -r nb; do
-              nb_relpath=$(realpath --relative-to=. "$nb")
-              temp_md_path="temp_md/${nb_relpath%.ipynb}.md"
-              mkdir -p "$(dirname "$temp_md_path")"
+            TARGET_DIR="./temp_md"
+            mkdir -p "$TARGET_DIR"
+            rm -f jq_batch_error.log
 
-              # 核心修改：实现「单元格内1:1还原、单元格间单空行分隔」，兼容 markdownlint
+            # 初始化统计变量
+            total_ipynb=0
+            success_process=0
+            no_content_skip=0
+            random_check_done=0  # 标记是否已完成随机片段检查
+
+            find . -name "*.ipynb" -type f | while IFS= read -r nb_file; do
+              # 跳过隐藏目录（本地逻辑：匹配 /./）
+              if [[ "$nb_file" =~ /\./ ]]; then continue; fi
+              # 跳过空文件（本地逻辑）
+              if [ ! -s "$nb_file" ]; then continue; fi
+
+              # 统计总处理文件数
+              total_ipynb=$((total_ipynb + 1))
+
+              # 生成目标 .md 文件路径
+              if command -v realpath &> /dev/null; then
+                nb_relpath=$(realpath --relative-to=. "$nb_file")
+              else
+                nb_relpath=$(echo "$nb_file" | sed 's|^./||')
+              fi
+              md_file="$TARGET_DIR/${nb_relpath%.ipynb}.md"
+              mkdir -p "$(dirname "$md_file")"
+
               jq -r '
-                .cells[]?  # 容错：忽略不存在的 cells 字段，避免空值报错
-                | select(.cell_type == "markdown")  # 筛选 markdown 单元格
+                .cells[]
+                | select(.cell_type == "markdown")
                 | (
-                    .source as $src
-                    # 核心容错：如果 $src 是字符串，转为单元素数组；否则保留原数组
-                    | if type == "string" then [$src] elif type == "array" then $src else [] end
-                    | map(.)  # 保留数组所有元素（包括空行、换行，实现单元格内1:1还原）
-                    | join("")  # 按原始顺序拼接，不修改单元格内任何格式
-                  ) + "###CELL_BOUNDARY###"  # 添加纯文本单元格分隔符，jq 无编译报错
-              ' "$nb" | \
+                    .source
+                    | map(.)
+                    | join("")
+                  ) + "###CELL_BOUNDARY###"
+              ' "$nb_file" | \
                 awk '
                   BEGIN {
-                    RS = "###CELL_BOUNDARY###"  # 以分隔符分割独立单元格
-                    first_cell = 1  # 标记第一个单元格，避免首行前加空行
+                    RS = "###CELL_BOUNDARY###"
+                    first_cell = 1
                   }
                   $0 != "" {
-                    # 清理单元格首尾多余空行（不破坏内部格式），兼容 markdownlint
                     gsub(/^[\n\r]+/, "");
                     gsub(/[\n\r]+$/, "");
                     current_cell = $0;
 
-                    # 单元格之间添加单空行分隔（满足核心诉求，兼容 markdownlint）
                     if (first_cell == 1) {
                       print current_cell;
                       first_cell = 0;
@@ -208,16 +226,55 @@ jobs:
                     }
                   }
                 ' | \
-                sed -e '/^\n\{2,\}/D' > "$temp_md_path"  # 过滤连续多空行，优化格式
+                sed -e '/^\n\{2,\}/D' | \
+                tee "$md_file" > /dev/null 2>> jq_batch_error.log && \
+                sync "$md_file"
 
+              if [ -s "$md_file" ]; then
+                echo "✅ 处理成功：$nb_file → $md_file"
+                success_process=$((success_process + 1))
+
+                # ======================================
+                # 新增：随机提取 1 个 MD 文件片段检查（仅执行 1 次）
+                # ======================================
+                if [ $random_check_done -eq 0 ] && [ $success_process -eq 5 ]; then  # 选择第 5 个成功处理的文件
+                  echo "======================================"
+                  echo "===== 随机提取 MD 文件片段（前 60 行） ====="
+                  echo "源文件：$nb_file"
+                  echo "MD 文件：$md_file"
+                  echo "----------------------------------------"
+                  head -n 60 "$md_file"
+                  echo "----------------------------------------"
+                  echo "===== 片段检查结束 ====="
+                  echo "======================================"
+                  random_check_done=1  # 标记为已执行，避免重复
+                fi
+              else
+                rm -f "$md_file"
+                echo "ℹ️  无有效内容，跳过：$nb_file"
+                no_content_skip=$((no_content_skip + 1))
+              fi
             done
 
-        - name: Run markdownlint
+            # ======================================
+            # 新增：批量处理汇总统计
+            # ======================================
+            echo "======================================"
+            echo "===== 批量处理完成汇总 ====="
+            echo "总扫描到有效 .ipynb 文件数：$total_ipynb"
+            echo "✅  处理成功（生成非空 MD）：$success_process"
+            echo "ℹ️  无有效内容跳过：$no_content_skip"
+            echo "错误日志文件：jq_batch_error.log（若有报错）"
+            echo "===== 本地逻辑完全对齐，无差异迁移 ====="
+            echo "======================================"
+
+        - name: Run markdownlint (可选，保持原有)
           uses: DavidAnson/markdownlint-cli2-action@v15
           with:
             globs: "**/*.md"
             config: ".github/.markdownlint.json"
 
+        # 可选：保留 temp_md 目录供下载验证（注释清理步骤即可）
         - name: Clean up temporary files
           if: ${{ always() }}
           run: rm -rf temp_md
