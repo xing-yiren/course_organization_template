@@ -162,7 +162,7 @@ jobs:
         - name: Checkout Code
           uses: actions/checkout@v4
           with:
-            fetch-depth: 1  # 确保完整检出代码，避免文件缺失
+            fetch-depth: 1  # 确保完整检出代码
 
         - name: Extract Markdown from .ipynb files
           id: extract_md
@@ -171,12 +171,15 @@ jobs:
             export LC_ALL=en_US.UTF-8
             export LANG=en_US.UTF-8
 
-            # 新增：初始化统计变量
+            # 新增：初始化统计变量（必须提前赋值，包括 current_file_num）
             total_ipynb=0
             success_extract=0
             failed_extract=0
             skipped_extract=0
             failed_files_list=""
+            current_file_num=0  # 关键：初始化循环内序号变量
+
+            mkdir -p temp_md
 
             # 新增：第一步：先全局查找 .ipynb 文件，打印原始列表，确认是否存在
             echo "===== 第一步：全局扫描 .ipynb 文件 ====="
@@ -200,94 +203,106 @@ jobs:
             fi
             echo "======================================"
 
-            mkdir -p temp_md
             echo "===== 开始提取 .ipynb 文件中的 Markdown ====="
 
-            # 修改：遍历已找到的 IPYNB_FILES，而非重新执行 find
-            echo "$IPYNB_FILES" | while IFS= read -r nb; do
-              # 跳过空行（避免 wc -l 统计时的空行干扰）
-              if [ -z "$nb" ]; then
-                continue
-              fi
+            # ======================================
+            # 核心修复：解决管道子 shell 变量隔离问题
+            # 方案1：使用 process substitution 替代管道，避免子 shell
+            # 方案2：将变量写入临时文件，循环后读取（更兼容）
+            # 此处选择方案1：重写遍历逻辑，避免管道子 shell
+            # ======================================
+            if [ "$total_ipynb" -gt 0 ]; then
+              # 重写遍历：不使用管道，直接遍历数组（避免子 shell）
+              # 第一步：将 IPYNB_FILES 转为数组（处理空格路径）
+              IFS=$'\n' read -r -d '' -a ipynb_array <<< "$IPYNB_FILES"
+              unset IFS
 
-              # 新增：文件计数（此处用序号，保持与全局统计一致）
-              current_file_num=$((current_file_num + 1))
-              echo "----------------------------------------"
-              echo "正在处理文件 [$current_file_num/$total_ipynb]: $nb"
-
-              # 新增：校验文件是否存在且可读
-              if [ ! -f "$nb" ] || [ ! -r "$nb" ]; then
-                echo "⚠️  文件不存在或不可读，跳过：$nb"
-                skipped_extract=$((skipped_extract + 1))
-                continue
-              fi
-
-              # 原有路径处理逻辑（优化：处理空格路径，用引号包裹所有变量）
-              nb_relpath=$(realpath --relative-to=. "$nb" 2>/dev/null)
-              # 兜底：若 realpath 失败，直接使用原始路径
-              if [ -z "$nb_relpath" ]; then
-                nb_relpath="$nb"
-              fi
-              temp_md_path="temp_md/${nb_relpath%.ipynb}.md"
-              mkdir -p "$(dirname "$temp_md_path")"
-              echo "目标 MD 文件：$temp_md_path"
-
-              # 核心修改：1. 增加 jq 容错 2. 捕获解析错误 3. 分步输出
-              jq -r '
-                .cells[]?  # 容错：忽略不存在的 cells 字段，避免空值报错
-                | select(.cell_type == "markdown")  # 筛选 markdown 单元格
-                | (
-                    .source as $src
-                    # 核心容错：如果 $src 是字符串，转为单元素数组；否则保留原数组
-                    | if type == "string" then [$src] elif type == "array" then $src else [] end
-                    | map(.)  # 保留数组所有元素（包括空行、换行，实现单元格内1:1还原）
-                    | join("")  # 按原始顺序拼接，不修改单元格内任何格式
-                  ) + "###CELL_BOUNDARY###"  # 添加纯文本单元格分隔符，jq 无编译报错
-              ' "$nb" 2> "./temp_md/${nb_relpath%.ipynb}.jq_error" | \
-                awk '
-                  BEGIN {
-                    RS = "###CELL_BOUNDARY###"  # 以分隔符分割独立单元格
-                    first_cell = 1  # 标记第一个单元格，避免首行前加空行
-                  }
-                  $0 != "" {
-                    # 清理单元格首尾多余空行（不破坏内部格式），兼容 markdownlint
-                    gsub(/^[\n\r]+/, "");
-                    gsub(/[\n\r]+$/, "");
-                    current_cell = $0;
-
-                    # 单元格之间添加单空行分隔（满足核心诉求，兼容 markdownlint）
-                    if (first_cell == 1) {
-                      print current_cell;
-                      first_cell = 0;
-                    } else {
-                      print "";
-                      print current_cell;
-                    }
-                  }
-                ' | \
-                sed -e '/^\n\{2,\}/D' > "$temp_md_path"
-
-              # 新增：检查 jq 执行结果，判断提取是否成功
-              jq_exit_code=${PIPESTATUS[0]}
-              if [ $jq_exit_code -eq 0 ] && [ -s "$temp_md_path" ]; then
-                # 提取成功且 MD 文件非空
-                echo "✅  提取成功：$nb → $temp_md_path"
-                success_extract=$((success_extract + 1))
-                # 清理 jq 错误日志（无错误时）
-                rm -f "./temp_md/${nb_relpath%.ipynb}.jq_error"
-              else
-                # 提取失败或 MD 文件为空
-                echo "❌  提取失败：$nb（jq 退出码：$jq_exit_code，MD 文件可能为空）"
-                failed_extract=$((failed_extract + 1))
-                failed_files_list+="$nb; "
-                # 保留错误日志供排查
-                if [ -f "./temp_md/${nb_relpath%.ipynb}.jq_error" ]; then
-                  echo "    错误详情：查看 ./temp_md/${nb_relpath%.ipynb}.jq_error"
+              # 第二步：遍历数组（在父 shell 中执行，变量修改有效）
+              for nb in "${ipynb_array[@]}"; do
+                # 跳过空行/空元素
+                if [ -z "$nb" ]; then
+                  continue
                 fi
-              fi
-            done
 
-            # 新增：提取完成汇总统计
+                # 变量自增（现在在父 shell 中，计数有效）
+                current_file_num=$((current_file_num + 1))
+                echo "----------------------------------------"
+                echo "正在处理文件 [$current_file_num/$total_ipynb]: $nb"
+
+                # 校验文件是否存在且可读
+                if [ ! -f "$nb" ] || [ ! -r "$nb" ]; then
+                  echo "⚠️  文件不存在或不可读，跳过：$nb"
+                  skipped_extract=$((skipped_extract + 1))  # 计数有效
+                  continue
+                fi
+
+                # 路径处理逻辑（优化：处理空格路径，用引号包裹所有变量）
+                nb_relpath=$(realpath --relative-to=. "$nb" 2>/dev/null)
+                # 兜底：若 realpath 失败，直接使用原始路径
+                if [ -z "$nb_relpath" ]; then
+                  nb_relpath="$nb"
+                fi
+                temp_md_path="temp_md/${nb_relpath%.ipynb}.md"
+                mkdir -p "$(dirname "$temp_md_path")"
+                echo "目标 MD 文件：$temp_md_path"
+
+                # 核心提取逻辑（不变，保留原有功能）
+                jq -r '
+                  .cells[]?  # 容错：忽略不存在的 cells 字段，避免空值报错
+                  | select(.cell_type == "markdown")  # 筛选 markdown 单元格
+                  | (
+                      .source as $src
+                      # 核心容错：如果 $src 是字符串，转为单元素数组；否则保留原数组
+                      | if type == "string" then [$src] elif type == "array" then $src else [] end
+                      | map(.)  # 保留数组所有元素（包括空行、换行，实现单元格内1:1还原）
+                      | join("")  # 按原始顺序拼接，不修改单元格内任何格式
+                    ) + "###CELL_BOUNDARY###"  # 添加纯文本单元格分隔符，jq 无编译报错
+                ' "$nb" 2> "./temp_md/${nb_relpath%.ipynb}.jq_error" | \
+                  awk '
+                    BEGIN {
+                      RS = "###CELL_BOUNDARY###"  # 以分隔符分割独立单元格
+                      first_cell = 1  # 标记第一个单元格，避免首行前加空行
+                    }
+                    $0 != "" {
+                      # 清理单元格首尾多余空行（不破坏内部格式），兼容 markdownlint
+                      gsub(/^[\n\r]+/, "");
+                      gsub(/[\n\r]+$/, "");
+                      current_cell = $0;
+
+                      # 单元格之间添加单空行分隔（满足核心诉求，兼容 markdownlint）
+                      if (first_cell == 1) {
+                        print current_cell;
+                        first_cell = 0;
+                      } else {
+                        print "";
+                        print current_cell;
+                      }
+                    }
+                  ' | \
+                  sed -e '/^\n\{2,\}/D' > "$temp_md_path"
+
+                # 检查 jq 执行结果，判断提取是否成功（计数有效）
+                jq_exit_code=${PIPESTATUS[0]}
+                if [ $jq_exit_code -eq 0 ] && [ -s "$temp_md_path" ]; then
+                  # 提取成功且 MD 文件非空
+                  echo "✅  提取成功：$nb → $temp_md_path"
+                  success_extract=$((success_extract + 1))  # 计数有效
+                  # 清理 jq 错误日志（无错误时）
+                  rm -f "./temp_md/${nb_relpath%.ipynb}.jq_error"
+                else
+                  # 提取失败或 MD 文件为空
+                  echo "❌  提取失败：$nb（jq 退出码：$jq_exit_code，MD 文件可能为空）"
+                  failed_extract=$((failed_extract + 1))  # 计数有效
+                  failed_files_list+="$nb; "
+                  # 保留错误日志供排查
+                  if [ -f "./temp_md/${nb_relpath%.ipynb}.jq_error" ]; then
+                    echo "    错误详情：查看 ./temp_md/${nb_relpath%.ipynb}.jq_error"
+                  fi
+                fi
+              done
+            fi
+
+            # 提取完成汇总统计（现在变量值准确）
             echo "======================================"
             echo "===== .ipynb Markdown 提取汇总 ====="
             echo "总扫描 .ipynb 文件数：$total_ipynb"
