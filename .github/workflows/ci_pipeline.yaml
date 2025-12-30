@@ -154,7 +154,7 @@ jobs:
             exit 1
           fi
 
-  markdownlint-check:
+markdownlint-check:
     name: Markdownlint Check
     runs-on: ubuntu-latest
 
@@ -175,19 +175,41 @@ jobs:
             temp_md_path="temp_md/${nb_relpath%.ipynb}.md"
             mkdir -p "$(dirname "$temp_md_path")"
 
-            # 修复后的 jq 命令：添加类型容错 + 编码兼容 + 空值处理
+            # 核心修改：实现「单元格内1:1还原、单元格间单空行分隔」，兼容 markdownlint
             jq -r '
               .cells[]?  # 容错：忽略不存在的 cells 字段，避免空值报错
               | select(.cell_type == "markdown")  # 筛选 markdown 单元格
-              | .source as $src
-              # 核心容错：如果 $src 是字符串，转为单元素数组；否则保留原数组
-              | if type == "string" then [$src] elif type == "array" then $src else [] end
-              # 过滤数组中的空字符串，避免无效内容
-              | map(select(. != ""))
-              # 拼接数组为完整字符串，行尾保留换行
-              | join("\n")
-              # 最终拼接所有 markdown 单元格，之间用两个换行分隔（保持格式）
-            ' "$nb" | awk 'NF > 0' > "$temp_md_path"  # 额外过滤全空行，优化 md 文件
+              | (
+                  .source as $src
+                  # 核心容错：如果 $src 是字符串，转为单元素数组；否则保留原数组
+                  | if type == "string" then [$src] elif type == "array" then $src else [] end
+                  | map(.)  # 保留数组所有元素（包括空行、换行，实现单元格内1:1还原）
+                  | join("")  # 按原始顺序拼接，不修改单元格内任何格式
+                ) + "###CELL_BOUNDARY###"  # 添加纯文本单元格分隔符，jq 无编译报错
+            ' "$nb" | \
+              awk '
+                BEGIN {
+                  RS = "###CELL_BOUNDARY###"  # 以分隔符分割独立单元格
+                  first_cell = 1  # 标记第一个单元格，避免首行前加空行
+                }
+                $0 != "" {
+                  # 清理单元格首尾多余空行（不破坏内部格式），兼容 markdownlint
+                  gsub(/^[\n\r]+/, "");
+                  gsub(/[\n\r]+$/, "");
+                  current_cell = $0;
+
+                  # 单元格之间添加单空行分隔（满足核心诉求，兼容 markdownlint）
+                  if (first_cell == 1) {
+                    print current_cell;
+                    first_cell = 0;
+                  } else {
+                    print "";
+                    print current_cell;
+                  }
+                }
+              ' | \
+              sed -e '/^\n\{2,\}/D' > "$temp_md_path"  # 过滤连续多空行，优化格式
+
           done
 
       - name: Run markdownlint
