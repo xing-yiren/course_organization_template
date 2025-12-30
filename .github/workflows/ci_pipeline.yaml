@@ -161,6 +161,8 @@ jobs:
       steps:
         - name: Checkout Code
           uses: actions/checkout@v4
+          with:
+            fetch-depth: 1  # 确保完整检出代码，避免文件缺失
 
         - name: Extract Markdown from .ipynb files
           id: extract_md
@@ -176,13 +178,42 @@ jobs:
             skipped_extract=0
             failed_files_list=""
 
+            # 新增：第一步：先全局查找 .ipynb 文件，打印原始列表，确认是否存在
+            echo "===== 第一步：全局扫描 .ipynb 文件 ====="
+            # 优化 find 命令：1. 排除 .git/.github 2. 处理空格路径 3. 打印所有找到的文件
+            IPYNB_FILES=$(find . -type f -name "*.ipynb" ! -path "./.git/*" ! -path "./.github/*" -print 2>/dev/null)
+            # 统计真实找到的 .ipynb 文件数
+            total_ipynb=$(echo "$IPYNB_FILES" | wc -l | tr -d ' ')
+            # 兜底：若统计结果非数字，强制设为 0
+            if ! [[ "$total_ipynb" =~ ^[0-9]+$ ]]; then
+              total_ipynb=0
+            fi
+
+            # 打印扫描结果，确认是否找到文件
+            echo "全局扫描到的 .ipynb 文件列表："
+            if [ "$total_ipynb" -gt 0 ]; then
+              echo "$IPYNB_FILES" | while IFS= read -r file; do
+                echo "  - $file"
+              done
+            else
+              echo "  ❌  未找到任何 .ipynb 文件"
+            fi
+            echo "======================================"
+
             mkdir -p temp_md
             echo "===== 开始提取 .ipynb 文件中的 Markdown ====="
-            find . -name "*.ipynb" | while IFS= read -r nb; do
-              # 新增：文件计数 + 打印当前处理文件
-              total_ipynb=$((total_ipynb + 1))
+
+            # 修改：遍历已找到的 IPYNB_FILES，而非重新执行 find
+            echo "$IPYNB_FILES" | while IFS= read -r nb; do
+              # 跳过空行（避免 wc -l 统计时的空行干扰）
+              if [ -z "$nb" ]; then
+                continue
+              fi
+
+              # 新增：文件计数（此处用序号，保持与全局统计一致）
+              current_file_num=$((current_file_num + 1))
               echo "----------------------------------------"
-              echo "正在处理文件 [$total_ipynb]: $nb"
+              echo "正在处理文件 [$current_file_num/$total_ipynb]: $nb"
 
               # 新增：校验文件是否存在且可读
               if [ ! -f "$nb" ] || [ ! -r "$nb" ]; then
@@ -191,8 +222,12 @@ jobs:
                 continue
               fi
 
-              # 原有路径处理逻辑
-              nb_relpath=$(realpath --relative-to=. "$nb")
+              # 原有路径处理逻辑（优化：处理空格路径，用引号包裹所有变量）
+              nb_relpath=$(realpath --relative-to=. "$nb" 2>/dev/null)
+              # 兜底：若 realpath 失败，直接使用原始路径
+              if [ -z "$nb_relpath" ]; then
+                nb_relpath="$nb"
+              fi
               temp_md_path="temp_md/${nb_relpath%.ipynb}.md"
               mkdir -p "$(dirname "$temp_md_path")"
               echo "目标 MD 文件：$temp_md_path"
