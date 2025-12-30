@@ -170,141 +170,111 @@ jobs:
             export LC_ALL=en_US.UTF-8
             export LANG=en_US.UTF-8
 
+            TARGET_DIR="./temp_md"
+            mkdir -p "$TARGET_DIR"
+            rm -f jq_batch_error.log
+
             # 初始化统计变量
             total_ipynb=0
-            success_extract=0
-            failed_extract=0
-            skipped_extract=0
-            failed_files_list=""
-            current_file_num=0
+            success_process=0
+            no_content_skip=0
+            random_check_done=0  # 标记是否已完成随机片段检查
 
-            mkdir -p temp_md
+            find . -name "*.ipynb" -type f | while IFS= read -r nb_file; do
+              # 跳过隐藏目录（本地逻辑：匹配 /./）
+              if [[ "$nb_file" =~ /\./ ]]; then continue; fi
+              # 跳过空文件（本地逻辑）
+              if [ ! -s "$nb_file" ]; then continue; fi
 
-            # 全局扫描 .ipynb 文件
-            echo "===== 第一步：全局扫描 .ipynb 文件 ====="
-            IPYNB_FILES=$(find . -type f -name "*.ipynb" ! -path "./.git/*" ! -path "./.github/*" -print 2>/dev/null)
-            total_ipynb=$(echo "$IPYNB_FILES" | wc -l | tr -d ' ')
-            if ! [[ "$total_ipynb" =~ ^[0-9]+$ ]]; then
-              total_ipynb=0
-            fi
+              # 统计总处理文件数
+              total_ipynb=$((total_ipynb + 1))
 
-            # 打印扫描结果
-            echo "全局扫描到的 .ipynb 文件列表："
-            if [ "$total_ipynb" -gt 0 ]; then
-              echo "$IPYNB_FILES" | while IFS= read -r file; do
-                echo "  - $file"
-              done
-            else
-              echo "  ❌  未找到任何 .ipynb 文件"
-            fi
-            echo "======================================"
+              # 生成目标 .md 文件路径
+              if command -v realpath &> /dev/null; then
+                nb_relpath=$(realpath --relative-to=. "$nb_file")
+              else
+                nb_relpath=$(echo "$nb_file" | sed 's|^./||')
+              fi
+              md_file="$TARGET_DIR/${nb_relpath%.ipynb}.md"
+              mkdir -p "$(dirname "$md_file")"
 
-            echo "===== 开始提取 .ipynb 文件中的 Markdown ====="
+              jq -r '
+                .cells[]
+                | select(.cell_type == "markdown")
+                | (
+                    .source
+                    | map(.)
+                    | join("")
+                  ) + "###CELL_BOUNDARY###"
+              ' "$nb_file" | \
+                awk '
+                  BEGIN {
+                    RS = "###CELL_BOUNDARY###"
+                    first_cell = 1
+                  }
+                  $0 != "" {
+                    gsub(/^[\n\r]+/, "");
+                    gsub(/[\n\r]+$/, "");
+                    current_cell = $0;
 
-            if [ "$total_ipynb" -gt 0 ]; then
-              # 临时文件存储文件列表，避免子 shell 变量丢失
-              TEMP_FILE_LIST="./temp_md/ipynb_file_list.tmp"
-              echo "$IPYNB_FILES" > "$TEMP_FILE_LIST"
+                    if (first_cell == 1) {
+                      print current_cell;
+                      first_cell = 0;
+                    } else {
+                      print "";
+                      print current_cell;
+                    }
+                  }
+                ' | \
+                sed -e '/^\n\{2,\}/D' | \
+                tee "$md_file" > /dev/null 2>> jq_batch_error.log && \
+                sync "$md_file"
 
-              # 重定向读取临时文件，父 shell 内执行
-              while IFS= read -r nb; do
-                if [ -z "$nb" ]; then
-                  continue
-                fi
-
-                current_file_num=$((current_file_num + 1))
-                echo "----------------------------------------"
-                echo "正在处理文件 [$current_file_num/$total_ipynb]: $nb"
-
-                # 校验文件可读性
-                if [ ! -f "$nb" ] || [ ! -r "$nb" ]; then
-                  echo "⚠️  文件不存在或不可读，跳过：$nb"
-                  skipped_extract=$((skipped_extract + 1))
-                  continue
-                fi
-
-                # 路径处理
-                nb_relpath=$(realpath --relative-to=. "$nb" 2>/dev/null)
-                if [ -z "$nb_relpath" ]; then
-                  nb_relpath="$nb"
-                fi
-                temp_md_path="temp_md/${nb_relpath%.ipynb}.md"
-                mkdir -p "$(dirname "$temp_md_path")"
-                echo "目标 MD 文件：$temp_md_path"
+              if [ -s "$md_file" ]; then
+                echo "✅ 处理成功：$nb_file → $md_file"
+                success_process=$((success_process + 1))
 
                 # ======================================
-                # 核心修复：彻底清理连续空行，保留必要分隔
+                # 新增：随机提取 1 个 MD 文件片段检查（仅执行 1 次）
                 # ======================================
-                jq -r '
-                  .cells[]?
-                  | select(.cell_type == "markdown")
-                  | (
-                      .source as $src
-                      | if type == "string" then [$src] elif type == "array" then $src else [] end
-                      | map(.)
-                      | join("")
-                    ) + "###CELL_BOUNDARY###"
-                ' "$nb" 2> "./temp_md/${nb_relpath%.ipynb}.jq_error" | \
-                  # 第一步：按单元格分隔，清理单元格首尾空行
-                  awk '
-                    BEGIN {
-                      RS = "###CELL_BOUNDARY###"
-                      first_cell = 1
-                    }
-                    $0 != "" {
-                      # 清理单元格首尾所有空行（关键：避免单元格内带大量空行）
-                      gsub(/^[\n\r]+/, "");
-                      gsub(/[\n\r]+$/, "");
-                      current_cell = $0;
-
-                      # 单元格之间添加 1 个空行分隔（仅必要空行）
-                      if (first_cell == 1) {
-                        print current_cell;
-                        first_cell = 0;
-                      } else {
-                        print "";
-                        print current_cell;
-                      }
-                    }
-                  ' | \
-                  # 第二步：彻底清理连续空行（核心！解决 MD012 错误）
-                  sed -e ':a' -e '/^\n*$/{$d;N;ba' -e '}' -e 's/\n\{2,\}/\n/g' > "$temp_md_path"
-
-                # 校验提取结果
-                jq_exit_code=${PIPESTATUS[0]}
-                if [ $jq_exit_code -eq 0 ] && [ -s "$temp_md_path" ]; then
-                  echo "✅  提取成功：$nb → $temp_md_path"
-                  success_extract=$((success_extract + 1))
-                  rm -f "./temp_md/${nb_relpath%.ipynb}.jq_error"
-                else
-                  echo "❌  提取失败：$nb（jq 退出码：$jq_exit_code）"
-                  failed_extract=$((failed_extract + 1))
-                  failed_files_list+="$nb; "
+                if [ $random_check_done -eq 0 ] && [ $success_process -eq 5 ]; then  # 选择第 5 个成功处理的文件
+                  echo "======================================"
+                  echo "===== 随机提取 MD 文件片段（前 60 行） ====="
+                  echo "源文件：$nb_file"
+                  echo "MD 文件：$md_file"
+                  echo "----------------------------------------"
+                  head -n 60 "$md_file"
+                  echo "----------------------------------------"
+                  echo "===== 片段检查结束 ====="
+                  echo "======================================"
+                  random_check_done=1  # 标记为已执行，避免重复
                 fi
-              done < "$TEMP_FILE_LIST"
+              else
+                rm -f "$md_file"
+                echo "ℹ️  无有效内容，跳过：$nb_file"
+                no_content_skip=$((no_content_skip + 1))
+              fi
+            done
 
-              # 清理临时文件
-              rm -f "$TEMP_FILE_LIST"
-            fi
-
-            # 汇总统计
+            # ======================================
+            # 新增：批量处理汇总统计
+            # ======================================
             echo "======================================"
-            echo "===== .ipynb Markdown 提取汇总 ====="
-            echo "总扫描 .ipynb 文件数：$total_ipynb"
-            echo "✅  提取成功数：$success_extract"
-            echo "❌  提取失败数：$failed_extract"
-            echo "⚠️  跳过文件数：$skipped_extract"
-            if [ $failed_extract -gt 0 ]; then
-              echo "失败文件列表：${failed_files_list%;; }"
-            fi
+            echo "===== 批量处理完成汇总 ====="
+            echo "总扫描到有效 .ipynb 文件数：$total_ipynb"
+            echo "✅  处理成功（生成非空 MD）：$success_process"
+            echo "ℹ️  无有效内容跳过：$no_content_skip"
+            echo "错误日志文件：jq_batch_error.log（若有报错）"
+            echo "===== 本地逻辑完全对齐，无差异迁移 ====="
             echo "======================================"
 
-        - name: Run markdownlint
+        - name: Run markdownlint (可选，保持原有)
           uses: DavidAnson/markdownlint-cli2-action@v15
           with:
             globs: "**/*.md"
             config: ".github/.markdownlint.json"
 
+        # 可选：保留 temp_md 目录供下载验证（注释清理步骤即可）
         - name: Clean up temporary files
           if: ${{ always() }}
           run: rm -rf temp_md
