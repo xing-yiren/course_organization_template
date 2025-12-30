@@ -162,16 +162,15 @@ jobs:
         - name: Checkout Code
           uses: actions/checkout@v4
           with:
-            fetch-depth: 1  # 确保完整检出代码
+            fetch-depth: 1
 
         - name: Extract Markdown from .ipynb files
           id: extract_md
           run: |
-            # 新增：确保环境支持 UTF-8 编码，避免中文乱码
             export LC_ALL=en_US.UTF-8
             export LANG=en_US.UTF-8
 
-            # 新增：初始化统计变量（必须提前赋值）
+            # 初始化统计变量
             total_ipynb=0
             success_extract=0
             failed_extract=0
@@ -181,13 +180,10 @@ jobs:
 
             mkdir -p temp_md
 
-            # 第一步：全局查找 .ipynb 文件，打印原始列表
+            # 全局扫描 .ipynb 文件
             echo "===== 第一步：全局扫描 .ipynb 文件 ====="
-            # 优化 find 命令：兼容所有路径，屏蔽错误输出
             IPYNB_FILES=$(find . -type f -name "*.ipynb" ! -path "./.git/*" ! -path "./.github/*" -print 2>/dev/null)
-            # 统计真实找到的 .ipynb 文件数
             total_ipynb=$(echo "$IPYNB_FILES" | wc -l | tr -d ' ')
-            # 兜底：若统计结果非数字，强制设为 0
             if ! [[ "$total_ipynb" =~ ^[0-9]+$ ]]; then
               total_ipynb=0
             fi
@@ -205,34 +201,29 @@ jobs:
 
             echo "===== 开始提取 .ipynb 文件中的 Markdown ====="
 
-            # ======================================
-            # 核心修复：1. 放弃数组，改用临时文件存储文件列表 2. 避免子 shell 变量丢失 3. 兼容所有 Bash 版本
-            # ======================================
             if [ "$total_ipynb" -gt 0 ]; then
-              # 步骤1：将 .ipynb 文件列表写入临时文件（每行一个文件，避免空格问题）
+              # 临时文件存储文件列表，避免子 shell 变量丢失
               TEMP_FILE_LIST="./temp_md/ipynb_file_list.tmp"
               echo "$IPYNB_FILES" > "$TEMP_FILE_LIST"
 
-              # 步骤2：用 while 循环读取临时文件（关键：用 < 重定向，而非管道，避免子 shell！）
+              # 重定向读取临时文件，父 shell 内执行
               while IFS= read -r nb; do
-                # 跳过空行/空元素
                 if [ -z "$nb" ]; then
                   continue
                 fi
 
-                # 变量自增（现在在父 shell 中执行，计数有效，不会丢失）
                 current_file_num=$((current_file_num + 1))
                 echo "----------------------------------------"
                 echo "正在处理文件 [$current_file_num/$total_ipynb]: $nb"
 
-                # 校验文件是否存在且可读
+                # 校验文件可读性
                 if [ ! -f "$nb" ] || [ ! -r "$nb" ]; then
                   echo "⚠️  文件不存在或不可读，跳过：$nb"
                   skipped_extract=$((skipped_extract + 1))
                   continue
                 fi
 
-                # 路径处理逻辑（优化：兼容空格路径，兜底 realpath 失败）
+                # 路径处理
                 nb_relpath=$(realpath --relative-to=. "$nb" 2>/dev/null)
                 if [ -z "$nb_relpath" ]; then
                   nb_relpath="$nb"
@@ -241,28 +232,32 @@ jobs:
                 mkdir -p "$(dirname "$temp_md_path")"
                 echo "目标 MD 文件：$temp_md_path"
 
-                # 核心提取逻辑（完全不变，保留原有功能，捕获 jq 错误）
+                # ======================================
+                # 核心修复：彻底清理连续空行，保留必要分隔
+                # ======================================
                 jq -r '
-                  .cells[]?  # 容错：忽略不存在的 cells 字段
-                  | select(.cell_type == "markdown")  # 筛选 markdown 单元格
+                  .cells[]?
+                  | select(.cell_type == "markdown")
                   | (
                       .source as $src
-                      # 类型容错：字符串转数组，数组保留原样
                       | if type == "string" then [$src] elif type == "array" then $src else [] end
-                      | map(.)  # 1:1 还原单元格内所有内容
-                      | join("")  # 按原始顺序拼接
-                    ) + "###CELL_BOUNDARY###"  # 单元格分隔符
+                      | map(.)
+                      | join("")
+                    ) + "###CELL_BOUNDARY###"
                 ' "$nb" 2> "./temp_md/${nb_relpath%.ipynb}.jq_error" | \
+                  # 第一步：按单元格分隔，清理单元格首尾空行
                   awk '
                     BEGIN {
                       RS = "###CELL_BOUNDARY###"
                       first_cell = 1
                     }
                     $0 != "" {
+                      # 清理单元格首尾所有空行（关键：避免单元格内带大量空行）
                       gsub(/^[\n\r]+/, "");
                       gsub(/[\n\r]+$/, "");
                       current_cell = $0;
 
+                      # 单元格之间添加 1 个空行分隔（仅必要空行）
                       if (first_cell == 1) {
                         print current_cell;
                         first_cell = 0;
@@ -272,9 +267,10 @@ jobs:
                       }
                     }
                   ' | \
-                  sed -e '/^\n\{2,\}/D' > "$temp_md_path"
+                  # 第二步：彻底清理连续空行（核心！解决 MD012 错误）
+                  sed -e ':a' -e '/^\n*$/{$d;N;ba' -e '}' -e 's/\n\{2,\}/\n/g' > "$temp_md_path"
 
-                # 检查 jq 执行结果，更新计数（有效，无变量丢失）
+                # 校验提取结果
                 jq_exit_code=${PIPESTATUS[0]}
                 if [ $jq_exit_code -eq 0 ] && [ -s "$temp_md_path" ]; then
                   echo "✅  提取成功：$nb → $temp_md_path"
@@ -285,13 +281,13 @@ jobs:
                   failed_extract=$((failed_extract + 1))
                   failed_files_list+="$nb; "
                 fi
-              done < "$TEMP_FILE_LIST"  # 关键：用 < 重定向读取临时文件，避免管道子 shell！
+              done < "$TEMP_FILE_LIST"
 
-              # 清理临时文件列表
+              # 清理临时文件
               rm -f "$TEMP_FILE_LIST"
             fi
 
-            # 汇总统计（计数准确，无丢失）
+            # 汇总统计
             echo "======================================"
             echo "===== .ipynb Markdown 提取汇总 ====="
             echo "总扫描 .ipynb 文件数：$total_ipynb"
