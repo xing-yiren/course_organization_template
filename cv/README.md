@@ -18,4 +18,3 @@ To contribute a new CV application:
 3. Follow the notebook writing and naming standards in the [Contributing Guidelines](https://github.com/mindspore-courses/applications/wiki/Contributing-Guidelines).
 4. Update the application list in the README if required.
 
-
