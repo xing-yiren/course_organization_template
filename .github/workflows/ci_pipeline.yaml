@@ -344,17 +344,8 @@ jobs:
             done
             echo "======================================"
 
-<<<<<<< HEAD
             # 执行 markdownlint
             markdownlint-cli2 $LINT_GLOBS --config .github/.markdownlint.json
-=======
-
-        - name: Run markdownlint
-          uses: DavidAnson/markdownlint-cli2-action@v15
-          with:
-            globs: "**/*.md"
-            config: ".github/.markdownlint.json"
->>>>>>> 306b3494490c7212ae3a63919d9961fdb0e597c0
 
         - name: Clean up temporary files
           if: ${{ always() }}
