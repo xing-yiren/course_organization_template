@@ -184,7 +184,7 @@ jobs:
             gh auth login --with-token <<< "${{ steps.generate-token.outputs.token }}"
 
             # 3. 获取 PR 中所有改动的文件（排除已删除的文件）
-            ALL_CHANGED_FILES=$(gh pr diff ${{ github.event.pull_request.number }} --name-only | grep -v '^$')
+            ALL_CHANGED_FILES=$(gh pr diff ${{ github.event.pull_request.number }} --name-only --diff=HEAD)
 
             # 4. 筛选：改动的 .ipynb 和 .md 文件（仅保留存在且非空的）
             VALID_CHANGED_IPYNB=""
