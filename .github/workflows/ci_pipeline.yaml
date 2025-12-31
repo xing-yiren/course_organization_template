@@ -78,7 +78,7 @@ jobs:
           echo "============================"
 
       - name: Run Pylint for .py files
-        if: ${{ env.PY_FILE_COUNT > 0 }}  # 修复：-gt → >（大于）
+        if: ${{ env.PY_FILE_COUNT > 0 }}
         run: |
           NUM_CORES=$(nproc)
           # 校验 PY_FILES 是否为空，且存在有效文件
@@ -90,9 +90,7 @@ jobs:
           fi
 
           echo "Running Pylint on $PY_FILE_COUNT .py files..."
-          # 核心修复：执行 Pylint，屏蔽退出码（即使失败，也不终止步骤）
-          # 用 || true 确保命令执行后始终返回 0，不中断后续逻辑
-          # 同时将 Pylint 输出保存到日志文件，便于后续查看详细错误
+
           pylint ${{ env.PY_FILES }} --jobs=$NUM_CORES --rcfile=.github/pylint.conf > pylint_py_logs.txt 2>&1 || true
 
           # 记录 .py 检查的真实状态（成功/失败）
@@ -105,14 +103,14 @@ jobs:
           fi
 
       - name: Skip Pylint for .py (no files)
-        if: ${{ env.PY_FILE_COUNT == 0 }}  # 修复：-eq → ==（等于）
+        if: ${{ env.PY_FILE_COUNT == 0 }}
         run: |
           echo "✅ No .py files found, skipping Pylint for .py"
           echo "PYLINT_PY_STATUS=skipped" >> "$GITHUB_ENV"
 
 
       - name: Run Pylint for .ipynb files (via nbqa)
-        if: ${{ env.IPYNB_FILE_COUNT > 0 }}  # 修复：-gt → >（大于）
+        if: ${{ env.IPYNB_FILE_COUNT > 0 }}
         run: |
           NUM_CORES=$(nproc)
           # 同样校验 IPYNB_FILES 有效性
@@ -136,7 +134,7 @@ jobs:
           fi
 
       - name: Skip Pylint for .ipynb (no files)
-        if: ${{ env.IPYNB_FILE_COUNT == 0 }}  # 修复：-eq → ==（等于）
+        if: ${{ env.IPYNB_FILE_COUNT == 0 }}
         run: |
           echo "✅ No .ipynb files found, skipping Pylint for .ipynb"
           echo "PYLINT_IPYNB_STATUS=skipped" >> "$GITHUB_ENV"
@@ -175,9 +173,6 @@ jobs:
             rm -f jq_batch_error.log
 
             # 初始化统计变量
-            total_ipynb=0
-            success_process=0
-            no_content_skip=0
             random_check_done=0  # 标记是否已完成随机片段检查
 
             find . -name "*.ipynb" -type f | while IFS= read -r nb_file; do
@@ -185,9 +180,6 @@ jobs:
               if [[ "$nb_file" =~ /\./ ]]; then continue; fi
               # 跳过空文件（本地逻辑）
               if [ ! -s "$nb_file" ]; then continue; fi
-
-              # 统计总处理文件数
-              total_ipynb=$((total_ipynb + 1))
 
               # 生成目标 .md 文件路径
               if command -v realpath &> /dev/null; then
@@ -203,8 +195,7 @@ jobs:
                 | select(.cell_type == "markdown")
                 | (
                     .source
-                    | map(.)
-                    | join("")
+                    | if type == "array" then map(.) | join("") else . end
                   ) + "###CELL_BOUNDARY###"
               ' "$nb_file" | \
                 awk '
@@ -232,7 +223,6 @@ jobs:
 
               if [ -s "$md_file" ]; then
                 echo "✅ 处理成功：$nb_file → $md_file"
-                success_process=$((success_process + 1))
 
                 # ======================================
                 # 新增：随机提取 1 个 MD 文件片段检查（仅执行 1 次）
@@ -256,25 +246,13 @@ jobs:
               fi
             done
 
-            # ======================================
-            # 新增：批量处理汇总统计
-            # ======================================
-            echo "======================================"
-            echo "===== 批量处理完成汇总 ====="
-            echo "总扫描到有效 .ipynb 文件数：$total_ipynb"
-            echo "✅  处理成功（生成非空 MD）：$success_process"
-            echo "ℹ️  无有效内容跳过：$no_content_skip"
-            echo "错误日志文件：jq_batch_error.log（若有报错）"
-            echo "===== 本地逻辑完全对齐，无差异迁移 ====="
-            echo "======================================"
 
-        - name: Run markdownlint (可选，保持原有)
+        - name: Run markdownlint
           uses: DavidAnson/markdownlint-cli2-action@v15
           with:
             globs: "**/*.md"
             config: ".github/.markdownlint.json"
 
-        # 可选：保留 temp_md 目录供下载验证（注释清理步骤即可）
         - name: Clean up temporary files
           if: ${{ always() }}
           run: rm -rf temp_md
