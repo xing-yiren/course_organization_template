@@ -162,7 +162,70 @@ jobs:
           with:
             fetch-depth: 1
 
-        - name: Extract Markdown from .ipynb files
+        - name: Generate GitHub App token
+          id: generate-token
+          uses: actions/create-github-app-token@v1
+          with:
+            app-id: ${{ secrets.APP_ID }}
+            private-key: ${{ secrets.APP_PRIVATE_KEY }}
+
+        - name: Get PR changed .ipynb and .md files
+          id: get_pr_changed_files
+          if: ${{ github.event_name == 'pull_request' }}
+          run: |
+            # 1. 安装 gh 命令行工具（若未安装）
+            if ! command -v gh &> /dev/null; then
+              curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
+              echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
+              sudo apt update && sudo apt install gh -y
+            fi
+
+            # 2. 用GitHub App Token 认证 gh
+            gh auth login --with-token <<< "${{ steps.generate-token.outputs.token }}"
+
+            # 3. 获取 PR 中所有改动的文件（排除已删除的文件）
+            ALL_CHANGED_FILES=$(gh pr diff ${{ github.event.pull_request.number }} --name-only | grep -v '^$')
+
+            # 4. 筛选：改动的 .ipynb 和 .md 文件（仅保留存在且非空的）
+            VALID_CHANGED_IPYNB=""
+            VALID_CHANGED_MD=""
+
+            while IFS= read -r file; do
+              # 跳过已删除或空文件（双重保障）
+              if [ ! -f "$file" ] || [ ! -s "$file" ]; then
+                continue
+              fi
+
+              # 分类筛选 .ipynb 和 .md
+              if [[ "$file" =~ \.ipynb$ ]]; then
+                VALID_CHANGED_IPYNB+="$file"$'\n'
+              elif [[ "$file" =~ \.md$ ]]; then
+                VALID_CHANGED_MD+="$file"$'\n'
+              fi
+            done <<< "$ALL_CHANGED_FILES"
+
+            # 去除末尾空行，导出为环境变量（供后续步骤使用）
+            VALID_CHANGED_IPYNB=$(echo "$VALID_CHANGED_IPYNB" | sed '/^$/d')
+            VALID_CHANGED_MD=$(echo "$VALID_CHANGED_MD" | sed '/^$/d')
+
+            echo "VALID_CHANGED_IPYNB<<EOF" >> "$GITHUB_ENV"
+            echo "$VALID_CHANGED_IPYNB" >> "$GITHUB_ENV"
+            echo "EOF" >> "$GITHUB_ENV"
+
+            echo "VALID_CHANGED_MD<<EOF" >> "$GITHUB_ENV"
+            echo "$VALID_CHANGED_MD" >> "$GITHUB_ENV"
+            echo "EOF" >> "$GITHUB_ENV"
+
+            # 打印结果
+            echo "======================================"
+            echo "===== PR Changed Files Summary ====="
+            echo "✅  Changed .ipynb files (to extract):"
+            [ -z "$VALID_CHANGED_IPYNB" ] && echo "  - None" || echo "$VALID_CHANGED_IPYNB" | while IFS= read -r f; do echo "  - $f"; done
+            echo "✅  Changed .md files (to lint directly):"
+            [ -z "$VALID_CHANGED_MD" ] && echo "  - None" || echo "$VALID_CHANGED_MD" | while IFS= read -r f; do echo "  - $f"; done
+            echo "======================================"
+
+        - name: Extract Markdown from PR changed .ipynb files
           id: extract_md
           run: |
             export LC_ALL=en_US.UTF-8
@@ -170,16 +233,22 @@ jobs:
 
             TARGET_DIR="./temp_md"
             mkdir -p "$TARGET_DIR"
-            rm -f jq_batch_error.log
+            rm -f jq_batch_error.log  # 先清理旧日志，保证本次运行日志纯净
 
-            # 初始化统计变量
-            random_check_done=0  # 标记是否已完成随机片段检查
+            # 无改动 .ipynb 则直接退出
+            if [ -z "${{ env.VALID_CHANGED_IPYNB }}" ]; then
+              echo "ℹ️  No changed .ipynb files to process, skipping extraction"
+              exit 0
+            fi
 
-            find . -name "*.ipynb" -type f | while IFS= read -r nb_file; do
-              # 跳过隐藏目录（本地逻辑：匹配 /./）
+            # 仅遍历 PR 改动的 .ipynb 文件（核心提取逻辑，完全不变）
+            while IFS= read -r nb_file; do
+              if [ -z "$nb_file" ]; then continue; fi
               if [[ "$nb_file" =~ /\./ ]]; then continue; fi
-              # 跳过空文件（本地逻辑）
-              if [ ! -s "$nb_file" ]; then continue; fi
+              if [ ! -f "$nb_file" ] || [ ! -s "$nb_file" ]; then
+                echo "ℹ️  File invalid or empty, skipping: $nb_file"
+                continue
+              fi
 
               # 生成目标 .md 文件路径
               if command -v realpath &> /dev/null; then
@@ -190,6 +259,7 @@ jobs:
               md_file="$TARGET_DIR/${nb_relpath%.ipynb}.md"
               mkdir -p "$(dirname "$md_file")"
 
+              # 核心提取逻辑
               jq -r '
                 .cells[]
                 | select(.cell_type == "markdown")
@@ -221,37 +291,61 @@ jobs:
                 tee "$md_file" > /dev/null 2>> jq_batch_error.log && \
                 sync "$md_file"
 
+              # 验证结果
               if [ -s "$md_file" ]; then
                 echo "✅ 处理成功：$nb_file → $md_file"
-
-                # ======================================
-                # 新增：随机提取 1 个 MD 文件片段检查（仅执行 1 次）
-                # ======================================
-                if [ $random_check_done -eq 0 ] && [ $success_process -eq 5 ]; then  # 选择第 5 个成功处理的文件
-                  echo "======================================"
-                  echo "===== 随机提取 MD 文件片段（前 60 行） ====="
-                  echo "源文件：$nb_file"
-                  echo "MD 文件：$md_file"
-                  echo "----------------------------------------"
-                  head -n 60 "$md_file"
-                  echo "----------------------------------------"
-                  echo "===== 片段检查结束 ====="
-                  echo "======================================"
-                  random_check_done=1  # 标记为已执行，避免重复
-                fi
               else
                 rm -f "$md_file"
                 echo "ℹ️  无有效内容，跳过：$nb_file"
-                no_content_skip=$((no_content_skip + 1))
               fi
-            done
+            done <<< "${{ env.VALID_CHANGED_IPYNB }}"
 
+            # 打印 jq_batch_error.log 内容
+            echo "======================================"
+            echo "===== JQ Batch Error Log (if any) ====="
+            if [ -f "jq_batch_error.log" ] && [ -s "jq_batch_error.log" ]; then
+              # 日志非空，打印完整报错内容
+              cat jq_batch_error.log
+            else
+              # 日志为空/不存在，打印无报错提示
+              echo "No jq errors found during extraction."
+            fi
+            echo "======================================"
 
-        - name: Run markdownlint
+            # 提取步骤完成提示
+            echo "======================================"
+            echo "===== PR .ipynb Extraction Completed ====="
+            echo "======================================"
+
+        - name: Run markdownlint (PR changed .md + extracted MD)
           uses: DavidAnson/markdownlint-cli2-action@v15
-          with:
-            globs: "**/*.md"
-            config: ".github/.markdownlint.json"
+          if: ${{ env.VALID_CHANGED_IPYNB != '' || env.VALID_CHANGED_MD != '' }}
+          run: |
+            # 构建 markdownlint 检查路径列表
+            LINT_GLOBS=""
+
+            # 1. 添加 PR 改动的原生 .md 文件（直接校验）
+            if [ -n "${{ env.VALID_CHANGED_MD }}" ]; then
+              # 将原生 MD 文件路径转为空格分隔的字符串
+              RAW_MD_GLOBS=$(echo "${{ env.VALID_CHANGED_MD }}" | tr '\n' ' ' | sed 's/ $//')
+              LINT_GLOBS+="$RAW_MD_GLOBS "
+            fi
+
+            # 2. 添加 .ipynb 提取生成的 MD 文件（校验提取结果）
+            if [ -n "${{ env.VALID_CHANGED_IPYNB }}" ]; then
+              LINT_GLOBS+="temp_md/**/*.md"
+            fi
+
+            # 去除末尾空格，执行 markdownlint
+            LINT_GLOBS=$(echo "$LINT_GLOBS" | sed 's/ $//')
+            echo "===== Markdownlint Check Paths ====="
+            echo "$LINT_GLOBS" | tr ' ' '\n' | while IFS= read -r path; do
+              [ -n "$path" ] && echo "  - $path"
+            done
+            echo "======================================"
+
+            # 执行 markdownlint
+            markdownlint-cli2 $LINT_GLOBS --config .github/.markdownlint.json
 
         - name: Clean up temporary files
           if: ${{ always() }}
