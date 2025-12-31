@@ -318,10 +318,12 @@ jobs:
             echo "======================================"
 
         - name: Run markdownlint (PR changed .md + extracted MD)
-          uses: DavidAnson/markdownlint-cli2-action@v15
           if: ${{ env.VALID_CHANGED_IPYNB != '' || env.VALID_CHANGED_MD != '' }}
           run: |
-            # 构建 markdownlint 检查路径列表
+            # 安装 markdownlint-cli2（Ubuntu 环境无默认安装，需手动安装）
+            npm install -g markdownlint-cli2
+
+            # 构建 markdownlint 检查路径列表（保留你原来的所有逻辑，一字未改）
             LINT_GLOBS=""
 
             # 1. 添加 PR 改动的原生 .md 文件（直接校验）
