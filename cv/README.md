@@ -3,6 +3,7 @@
 This directory contains ready-to-use Computer Vision application notebooks built with MindSpore. Each notebook demonstrates a complete or partial workflow—training, finetuning, or inference—along with a brief introduction to the model used.
 
 ## Application List
+
 | No. | Model | Description                       |
 | :-- | :---- | :-------------------------------- |
 | 1   | [ResNet](./resnet/) | Includes notebooks for ResNet finetuning on tasks such as chinese herbal classification |
