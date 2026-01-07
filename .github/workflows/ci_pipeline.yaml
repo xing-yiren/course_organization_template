@@ -173,18 +173,21 @@ jobs:
           id: get_pr_changed_files
           if: ${{ github.event_name == 'pull_request' }}
           run: |
-            # 1. 安装 gh 命令行工具（若未安装）
-            if ! command -v gh &> /dev/null; then
-              curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
-              echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
-              sudo apt update && sudo apt install gh -y
+            # 1. 仅安装必需依赖：jq（解析 API 返回的 JSON）
+            if ! command -v jq &> /dev/null; then
+              sudo apt update && sudo apt install jq -y
             fi
 
-            # 2. 用GitHub App Token 认证 gh
-            gh auth login --with-token <<< "${{ steps.generate-token.outputs.token }}"
+            # 2. 直接获取 GitHub App Token
+            APP_TOKEN="${{ steps.generate-token.outputs.token }}"
 
-            # 3. 获取 PR 中所有改动的文件（排除已删除的文件）
-            ALL_CHANGED_FILES=$(gh pr diff ${{ github.event.pull_request.number }} --name-only --diff=HEAD)
+            # 3. 核心：调用 GitHub API 获取 PR 改动文件（仅新增/修改，排除删除）
+            ALL_CHANGED_FILES=$(curl -s \
+              -H "Authorization: Bearer $APP_TOKEN" \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              "https://api.github.com/repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files" \
+              | jq -r '.[] | select(.status != "removed") | .filename')
 
             # 4. 筛选：改动的 .ipynb 和 .md 文件（仅保留存在且非空的）
             VALID_CHANGED_IPYNB=""
