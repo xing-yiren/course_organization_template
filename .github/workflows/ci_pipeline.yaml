@@ -230,12 +230,15 @@ jobs:
         - name: Extract Markdown from PR changed .ipynb files
           id: extract_md
           run: |
+            set -euo pipefail
             export LC_ALL=en_US.UTF-8
             export LANG=en_US.UTF-8
 
-            # 核心配置
+            # 核心配置（导出为环境变量，供后续步骤使用）
             TARGET_DIR="./temp_md"
             MAP_FILE="./md_ipynb_mapping.log"
+            echo "TARGET_DIR=$TARGET_DIR" >> "$GITHUB_ENV"
+            echo "MAP_FILE=$MAP_FILE" >> "$GITHUB_ENV"
             mkdir -p "$TARGET_DIR"
 
             # 清理旧文件（保证本次运行纯净）
@@ -250,15 +253,15 @@ jobs:
 
             # 遍历 PR 改动的 .ipynb 文件（核心提取逻辑）
             while IFS= read -r nb_file; do
-              # 基础校验
+              # 基础校验（增强容错）
               if [ -z "$nb_file" ] || [[ "$nb_file" =~ /\./ ]] || [ ! -f "$nb_file" ] || [ ! -s "$nb_file" ]; then
                 echo "ℹ️  File invalid/empty, skipping: $nb_file"
                 continue
               fi
 
-              # 生成目标 MD 文件路径（保持目录结构）
+              # 生成目标 MD 文件路径（保持目录结构，处理特殊字符）
               if command -v realpath &> /dev/null; then
-                nb_relpath=$(realpath --relative-to=. "$nb_file")
+                nb_relpath=$(realpath --relative-to=. "$nb_file" 2>/dev/null || echo "$nb_file")
               else
                 nb_relpath=$(echo "$nb_file" | sed 's|^./||')
               fi
@@ -266,43 +269,54 @@ jobs:
               mkdir -p "$(dirname "$md_file")"
               > "$md_file"  # 清空目标文件
 
-              # Step 1: 提取Markdown单元格（带cell索引）
+              # Step 1: 提取Markdown单元格
               jq -r --arg nb_relpath "$nb_relpath" '
-                # 遍历所有markdown单元格，生成自增序号
-                foreach (.cells[] | select(.cell_type == "markdown")) as $cell (
-                  0;  # 初始序号为0
-                  . + 1;  # 每遍历一个单元格，序号+1
-                  # 拼接注释（序号-1，因为初始是0，+1后要还原）
-                  "<!-- ORIGIN: \($nb_relpath) (cell: \(. - 1)) -->\n" +
+                # 筛选markdown单元格并添加索引
+                [.cells[] | select(.cell_type == "markdown")] as $md_cells
+                | $md_cells[] | . as $cell
+                | index($md_cells) as $cell_idx
+                | "<!-- ORIGIN: \($nb_relpath) (cell: \($cell_idx)) -->\n" +
                   (
                     $cell.source
                     | if type == "array" then map(.) | join("") else . end
                   ) + "\n<!-- CELL_BOUNDARY -->"
-                )
               ' "$nb_file" > temp_extract.tmp 2>> jq_batch_error.log
+
+              # 兜底：如果jq执行失败，跳过当前文件
+              if [ $? -ne 0 ]; then
+                echo "⚠️  JQ extraction failed for $nb_file, skipping"
+                rm -f temp_extract.tmp
+                continue
+              fi
 
               # Step 2: 处理提取内容，生成MD文件 + 行号映射表
               awk -v nb_file="$nb_file" -v map_file="$MAP_FILE" -v md_file="$md_file" '
                 BEGIN {
-                  # 用HTML注释作为分隔符（注释单独成行，零语法风险）
                   RS = "<!-- CELL_BOUNDARY -->"
                   first_cell = 1
                   md_line = 0
-                  cell_idx = 0
+                  cell_idx = "unknown"  \# 兜底默认值
                 }
                 $0 != "" {
-                  # 清理首尾空行
+                  \# 清理首尾空行
                   gsub(/^[\n\r]+/, "");
                   gsub(/[\n\r]+$/, "");
                   current_cell = $0;
 
-                  # 提取HTML注释中的cell索引（匹配<!-- ORIGIN: ... (cell: N) -->）
+                  \# 提取HTML注释中的cell索引（增强正则匹配）
                   if (current_cell ~ /^<!-- ORIGIN: .* \(cell: [0-9]+\) -->$/) {
-                    split(current_cell, parts, /\(cell: |\)/);
-                    cell_idx = parts[2];
-                    print current_cell >> md_file;  # 写入真注释行
+                    match(current_cell, /\(cell: ([0-9]+)\)/, parts);
+                    if (parts[1] != "") {
+                      cell_idx = parts[1];
+                    }
+                    print current_cell >> md_file;
                     md_line++;
                     next;
+                  }
+
+                  # 跳过空内容（避免无效写入）
+                  if (current_cell == "") {
+                    continue;
                   }
 
                   # 写入markdown内容（处理空行分隔）
@@ -315,19 +329,21 @@ jobs:
                     md_line++;  # 空行占1行
                   }
 
-                  # 生成行号映射表（临时MD行号 → 原ipynb单元格）
+                  # 生成行号映射表（避免空cell_idx）
                   cell_lines = split(current_cell, lines, "\n");
                   for (i=1; i<=cell_lines; i++) {
                     md_line++;
+                    # 兜底：cell_idx为空时标记为unknown
                     print nb_file "," cell_idx "," md_file "," md_line >> map_file;
                   }
                 }
-              ' temp_extract.tmp
+              ' temp_extract.tmp 2>> jq_batch_error.log
 
               # 清理临时文件 + 验证结果
               rm -f temp_extract.tmp
               sync "$md_file"
 
+              # 最终验证：仅保留非空MD文件
               if [ -s "$md_file" ]; then
                 echo "✅ Extracted successfully: $nb_file → $md_file"
               else
@@ -340,12 +356,14 @@ jobs:
             echo -e "\n======================================"
             echo "===== Extraction Logs ====="
             if [ -f "jq_batch_error.log" ] && [ -s "jq_batch_error.log" ]; then
-              echo "❌ JQ Errors:"
+              echo "❌ JQ/AWK Errors:"
               cat jq_batch_error.log
             else
-              echo "✅ No JQ errors during extraction"
+              echo "✅ No JQ/AWK errors during extraction"
             fi
-            echo -e "✅ Mapping file: $MAP_FILE (lines: $(wc -l < "$MAP_FILE" 2>/dev/null || echo 0))"
+            # 安全获取映射表行数（避免文件不存在报错）
+            map_line_count=$( [ -f "$MAP_FILE" ] && wc -l < "$MAP_FILE" || echo 0 )
+            echo -e "✅ Mapping file: $MAP_FILE (lines: $map_line_count)"
             echo "======================================"
 
         - name: Run markdownlint (PR changed .md + extracted MD)
