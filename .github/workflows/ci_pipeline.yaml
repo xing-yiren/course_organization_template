@@ -262,37 +262,56 @@ jobs:
               md_file="$TARGET_DIR/${nb_relpath%.ipynb}.md"
               mkdir -p "$(dirname "$md_file")"
 
-              # 核心提取逻辑
+              # 提取带单元格索引的 markdown 内容（保留原单元格顺序）
               jq -r '
                 .cells[]
                 | select(.cell_type == "markdown")
-                | (
+                | (.metadata.cell_index // .index) as $cell_idx
+                | "# [ORIGIN: '${nb_relpath}' (cell: \($cell_idx))] \#\n" +
+                  (
                     .source
                     | if type == "array" then map(.) | join("") else . end
-                  ) + "###CELL_BOUNDARY###"
+                  ) + "\n\##\#CELL_BOUNDARY\##\#"
               ' "$nb_file" | \
-                awk '
+                awk -v nb_file="$nb_file" -v map_file="$MAP_FILE" '
                   BEGIN {
-                    RS = "###CELL_BOUNDARY###"
+                    RS = "\##\#CELL_BOUNDARY\##\#"
                     first_cell = 1
+                    md_line = 0  \# 临时 MD 文件的行号
+                    cell_idx = 0 \# 原 .ipynb 单元格索引
                   }
                   $0 != "" {
+                    \# 去掉首尾空行
                     gsub(/^[\n\r]+/, "");
                     gsub(/[\n\r]+$/, "");
                     current_cell = $0;
 
+                    \# 提取注释中的单元格索引（[ORIGIN: xxx (cell: N)]）
+                    if (current_cell ~ /^\# \[ORIGIN: .* \(cell: [0-9]+\)\] #$/) {
+                      cell_idx = substr(current_cell, index(current_cell, "(cell: ") + 7, index(current_cell, ")") - index(current_cell, "(cell: ") -7);
+                      # 注释行不计入实际内容行，行号+1后跳过
+                      md_line++;
+                      next;
+                    }
+
+                    # 写入临时 MD 文件
                     if (first_cell == 1) {
-                      print current_cell;
+                      print current_cell > "'"$md_file"'";
                       first_cell = 0;
                     } else {
-                      print "";
-                      print current_cell;
+                      print "" > "'"$md_file"'";
+                      print current_cell > "'"$md_file"'";
+                      md_line++; # 空行占1行
+                    }
+
+                    # 记录行号映射：临时文件行号 → 原 .ipynb 单元格
+                    cell_lines = split(current_cell, lines, "\n");
+                    for (i=1; i<=cell_lines; i++) {
+                      md_line++;
+                      print nb_file "," cell_idx "," md_file "," md_line >> map_file;
                     }
                   }
-                ' | \
-                sed -e '/^\n\{2,\}/D' | \
-                tee "$md_file" > /dev/null 2>> jq_batch_error.log && \
-                sync "$md_file"
+                ' | sed -e '/^\n\{2,\}/D' && sync "$md_file"
 
               # 验证结果
               if [ -s "$md_file" ]; then
@@ -318,6 +337,7 @@ jobs:
             # 提取步骤完成提示
             echo "======================================"
             echo "===== PR .ipynb Extraction Completed ====="
+            echo "✅  Trace map file: $MAP_FILE"
             echo "======================================"
 
         - name: Run markdownlint (PR changed .md + extracted MD)
@@ -350,7 +370,54 @@ jobs:
             echo "======================================"
 
             # 执行 markdownlint
-            markdownlint-cli2 $LINT_GLOBS --config .github/.markdownlint.json
+            MAP_FILE="./md_ipynb_mapping.log"
+            LINT_ERROR_LOG="./markdownlint_error.log"
+
+            # 执行 markdownlint，将报错输出到日志文件（保留原始报错）
+            markdownlint-cli2 $LINT_GLOBS --config .github/.markdownlint.json 2> "$LINT_ERROR_LOG"
+
+            # 检查是否有报错
+            if [ -s "$LINT_ERROR_LOG" ]; then
+              echo "======================================"
+              echo "===== Markdownlint Errors (Raw) ====="
+              cat "$LINT_ERROR_LOG"
+              echo "======================================"
+
+              echo "======================================"
+              echo "===== Markdownlint Errors (Traced to IPYNB) ====="
+              # 解析报错，关联原 .ipynb 文件
+              while IFS= read -r error_line; do
+                # 匹配 markdownlint 报错格式：temp_md/xxx.md:12:3: Error: xxx
+                if [[ "$error_line" =~ ^([^:]+):([0-9]+):[0-9]+: (.*)$ ]]; then
+                  md_file="${BASH_REMATCH[1]}"
+                  md_line="${BASH_REMATCH[2]}"
+                  error_msg="${BASH_REMATCH[3]}"
+
+                  # 从映射表中查找原 .ipynb 信息
+                  trace_info=$(grep "^.*,.*,$md_file,$md_line$" "$MAP_FILE" | head -n 1)
+                  if [ -n "$trace_info" ]; then
+                    # 解析映射表：ipynb_file,cell_idx,md_file,md_line
+                    IFS=',' read -r ipynb_file cell_idx _ _ <<< "$trace_info"
+                    echo "❌  ERROR in ORIGINAL FILE: $ipynb_file (cell: $cell_idx), line $md_line in temp file:"
+                    echo "   → $error_msg"
+                  else
+                    # 非提取的 MD 文件（原生 MD），直接输出
+                    echo "❌  ERROR in: $md_file (line $md_line):"
+                    echo "   → $error_msg"
+                  fi
+                else
+                  # 非标准报错，直接输出
+                  echo "$error_line"
+                fi
+              done < "$LINT_ERROR_LOG"
+              echo "======================================"
+
+              # 有报错则退出（保持 CI 校验逻辑）
+              exit 1
+            else
+              echo "✅  No markdownlint errors found!"
+              exit 0
+            fi
 
         - name: Clean up temporary files
           if: ${{ always() }}
