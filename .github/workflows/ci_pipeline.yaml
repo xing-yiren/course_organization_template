@@ -4,7 +4,6 @@ name: CI Pipeline
 
 # Controls when the workflow will run
 on:
-  # Triggers the workflow on push or pull request events but only for the "main" branch
   push:
     branches: [ "*" ]
   pull_request:
@@ -261,57 +260,65 @@ jobs:
               fi
               md_file="$TARGET_DIR/${nb_relpath%.ipynb}.md"
               mkdir -p "$(dirname "$md_file")"
+              > "$md_file"
 
               # 提取带单元格索引的 markdown 内容（保留原单元格顺序）
-              jq -r '
+              jq -r --arg nb_relpath "$nb_relpath" '
                 .cells[]
                 | select(.cell_type == "markdown")
-                | (.metadata.cell_index // .index) as $cell_idx
-                | "# [ORIGIN: '${nb_relpath}' (cell: \($cell_idx))] \#\n" +
+                | (.metadata.cell_index // (.index | tostring)) as $cell_idx
+                | "# [ORIGIN: \($nb_relpath) (cell: \($cell_idx))] \#\n" +
                   (
                     .source
                     | if type == "array" then map(.) | join("") else . end
                   ) + "\n\##\#CELL_BOUNDARY\##\#"
-              ' "$nb_file" | \
-                awk -v nb_file="$nb_file" -v map_file="$MAP_FILE" '
-                  BEGIN {
-                    RS = "\##\#CELL_BOUNDARY\##\#"
-                    first_cell = 1
-                    md_line = 0  \# 临时 MD 文件的行号
-                    cell_idx = 0 \# 原 .ipynb 单元格索引
+              ' "$nb_file" > temp_extract.tmp 2>> jq_batch_error.log
+              awk -v nb_file="$nb_file" -v map_file="$MAP_FILE" -v md_file="$md_file" '
+                BEGIN {
+                  RS = "\##\#CELL_BOUNDARY\##\#"
+                  first_cell = 1
+                  md_line = 0  \# 临时 MD 文件的行号
+                  cell_idx = 0 \# 原 .ipynb 单元格索引
+                }
+                $0 != "" {
+                  \# 去掉首尾空行
+                  gsub(/^[\n\r]+/, "");
+                  gsub(/[\n\r]+$/, "");
+                  current_cell = $0;
+
+                  \# 提取注释中的单元格索引（[ORIGIN: xxx (cell: N)]）
+                  if (current_cell ~ /^\# \[ORIGIN: .* \(cell: [0-9]+\)\] #$/) {
+                    # 提取单元格索引
+                    split(current_cell, parts, /\(cell: |\)/);
+                    cell_idx = parts[2];
+                    # 注释行写入 MD 文件，行号+1
+                    print current_cell >> md_file;
+                    md_line++;
+                    next;
                   }
-                  $0 != "" {
-                    \# 去掉首尾空行
-                    gsub(/^[\n\r]+/, "");
-                    gsub(/[\n\r]+$/, "");
-                    current_cell = $0;
 
-                    \# 提取注释中的单元格索引（[ORIGIN: xxx (cell: N)]）
-                    if (current_cell ~ /^\# \[ORIGIN: .* \(cell: [0-9]+\)\] #$/) {
-                      cell_idx = substr(current_cell, index(current_cell, "(cell: ") + 7, index(current_cell, ")") - index(current_cell, "(cell: ") -7);
-                      # 注释行不计入实际内容行，行号+1后跳过
-                      md_line++;
-                      next;
-                    }
-
-                    # 写入临时 MD 文件
-                    if (first_cell == 1) {
-                      print current_cell > "'"$md_file"'";
-                      first_cell = 0;
-                    } else {
-                      print "" > "'"$md_file"'";
-                      print current_cell > "'"$md_file"'";
-                      md_line++; # 空行占1行
-                    }
-
-                    # 记录行号映射：临时文件行号 → 原 .ipynb 单元格
-                    cell_lines = split(current_cell, lines, "\n");
-                    for (i=1; i<=cell_lines; i++) {
-                      md_line++;
-                      print nb_file "," cell_idx "," md_file "," md_line >> map_file;
-                    }
+                  # 写入临时 MD 文件（处理空行）
+                  if (first_cell == 1) {
+                    print current_cell >> md_file;
+                    first_cell = 0;
+                  } else {
+                    print "" >> md_file;
+                    print current_cell >> md_file;
+                    md_line++; # 空行占1行
                   }
-                ' | sed -e '/^\n\{2,\}/D' && sync "$md_file"
+
+                  # 记录行号映射：临时文件行号 → 原 .ipynb 单元格
+                  cell_lines = split(current_cell, lines, "\n");
+                  for (i=1; i<=cell_lines; i++) {
+                    md_line++;
+                    print nb_file "," cell_idx "," md_file "," md_line >> map_file;
+                  }
+                }
+              ' temp_extract.tmp
+
+              # 清理临时文件 + 同步
+              rm -f temp_extract.tmp
+              sync "$md_file"
 
               # 验证结果
               if [ -s "$md_file" ]; then
@@ -346,7 +353,7 @@ jobs:
             # 安装 markdownlint-cli2（Ubuntu 环境无默认安装，需手动安装）
             npm install -g markdownlint-cli2
 
-            # 构建 markdownlint 检查路径列表（保留你原来的所有逻辑，一字未改）
+            # 构建 markdownlint 检查路径列表
             LINT_GLOBS=""
 
             # 1. 添加 PR 改动的原生 .md 文件（直接校验）
