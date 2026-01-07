@@ -10,7 +10,6 @@ This directory contains ready-to-use Computer Vision application notebooks built
 | 2   | [U-Net](./unet/) | Includes notebooks for U-Net training on tasks such as segmentation |
 
 ## Contributing New CV Applications
-
 To contribute a new CV application:
 
 1. Place your notebook in the corresponding model directory.
