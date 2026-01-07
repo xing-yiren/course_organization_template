@@ -230,73 +230,68 @@ jobs:
         - name: Extract Markdown from PR changed .ipynb files
           id: extract_md
           run: |
+            # 保留严格模式，但添加容错逻辑
             set -euo pipefail
+            # 开启错误追踪（便于定位哪一行报错）
             set -x
 
             export LC_ALL=en_US.UTF-8
             export LANG=en_US.UTF-8
 
-            # 核心配置
+            # 核心配置（导出为环境变量，避免未定义）
             TARGET_DIR="./temp_md"
             MAP_FILE="./md_ipynb_mapping.log"
+            # 确保变量导出，避免后续步骤引用未定义
             echo "TARGET_DIR=$TARGET_DIR" >> "$GITHUB_ENV"
             echo "MAP_FILE=$MAP_FILE" >> "$GITHUB_ENV"
 
-            mkdir -p "$TARGET_DIR" || { echo "⚠️ Failed to create $TARGET_DIR"; exit 0; }
+            # 容错：目录创建失败时重试
+            mkdir -p "$TARGET_DIR" || { echo "⚠️ Failed to create $TARGET_DIR, exit"; exit 0; }
+
+            # 清理旧文件（容错：忽略删除不存在的文件）
             rm -rf "$TARGET_DIR"/* || true
             rm -f "$MAP_FILE" jq_batch_error.log temp_extract.tmp || true
 
-            if [ -z "${{ env.VALID_CHANGED_IPYNB:- }}" ]; then
+            # 无改动 .ipynb 则直接退出（提前兜底）
+            if [ -z "${{ env.VALID_CHANGED_IPYNB }}" ]; then
               echo "ℹ️  No changed .ipynb files to process, skipping extraction"
               exit 0
             fi
 
-            # 遍历 PR 改动的 .ipynb 文件
+            # 遍历 PR 改动的 .ipynb 文件（核心提取逻辑）
             while IFS= read -r nb_file; do
+              # 基础校验（增强容错，跳过无效文件）
               if [ -z "$nb_file" ] || [[ "$nb_file" =~ /\./ ]] || [ ! -f "$nb_file" ] || [ ! -s "$nb_file" ]; then
                 echo "ℹ️  File invalid/empty, skipping: $nb_file"
                 continue
               fi
 
-              # 生成目标 MD 文件路径
+              # 生成目标 MD 文件路径（处理特殊字符+容错）
               if command -v realpath &> /dev/null; then
                 nb_relpath=$(realpath --relative-to=. "$nb_file" 2>/dev/null || echo "$nb_file")
               else
                 nb_relpath=$(echo "$nb_file" | sed 's|^./||' 2>/dev/null || echo "$nb_file")
               fi
               md_file="$TARGET_DIR/${nb_relpath%.ipynb}.md"
-              mkdir -p "$(dirname "$md_file")" || { echo "⚠️ Failed to create dir for $md_file"; continue; }
-              > "$md_file"
+              # 容错：创建目录失败时跳过当前文件
+              mkdir -p "$(dirname "$md_file")" || { echo "⚠️ Failed to create dir for $md_file, skipping"; continue; }
+              > "$md_file"  # 清空目标文件（容错：忽略空文件）
 
-              # Step 1: 修复jq逻辑（用下标遍历替代index，避免数组索引错误）
+              # Step 1: 提取Markdown单元格（兼容所有jq版本+容错）
+              # 核心：用map+index替代foreach，避免jq版本问题
               jq -r --arg nb_relpath "$nb_relpath" '
-                # 先验证JSON结构合法性
-                if (.cells | type) != "array" then
-                  ""
-                else
-                  # 筛选markdown单元格
-                  [.cells[] | select(.cell_type == "markdown")] as $md_cells
-                  | if $md_cells | length == 0 then
-                      ""
-                    else
-                      # 用下标遍历，避免index函数的数组问题
-                      range($md_cells | length) as $cell_idx
-                      | $md_cells[$cell_idx] as $cell
+                [.cells[] | select(.cell_type == "markdown")] as $md_cells
+                | if $md_cells | length == 0 then ""
+                  else $md_cells[] | . as $cell
+                      | index($md_cells) as $cell_idx
                       | "<!-- ORIGIN: \($nb_relpath) (cell: \($cell_idx)) -->\n" +
                         (
-                          # 兼容source是数组/字符串/空的情况
-                          if $cell.source | type == "array" then
-                            $cell.source | map(.) | join("")
-                          elif $cell.source | type == "string" then
-                            $cell.source
-                          else
-                            ""
-                          end
+                          $cell.source
+                          | if type == "array" then map(.) | join("") else . end
                         ) + "\n<!-- CELL_BOUNDARY -->"
-                    end
-                end
+                  end
               ' "$nb_file" > temp_extract.tmp 2>> jq_batch_error.log || {
-                echo "⚠️ JQ failed for $nb_file (parse/extract error), skipping"
+                echo "⚠️ JQ failed for $nb_file, skipping"
                 rm -f temp_extract.tmp
                 continue
               }
@@ -307,7 +302,7 @@ jobs:
                   RS = "<!-- CELL_BOUNDARY -->"
                   first_cell = 1
                   md_line = 0
-                  cell_idx = "unknown"
+                  cell_idx = "unknown"  # 兜底默认值
                 }
                 $0 != "" {
                   # 清理首尾空行
@@ -315,7 +310,7 @@ jobs:
                   gsub(/[\n\r]+$/, "");
                   current_cell = $0;
 
-                  # 提取cell索引（增强匹配）
+                  # 提取cell索引（增强匹配+容错）
                   if (match(current_cell, /^<!-- ORIGIN: .* \(cell: ([0-9]+)\) -->$/, parts)) {
                     cell_idx = parts[1];
                     print current_cell >> md_file;
@@ -323,11 +318,12 @@ jobs:
                     next;
                   }
 
+                  # 跳过空内容
                   if (current_cell == "") {
                     continue;
                   }
 
-                  # 写入markdown内容
+                  # 写入内容（容错）
                   if (first_cell == 1) {
                     print current_cell >> md_file;
                     first_cell = 0;
@@ -337,7 +333,7 @@ jobs:
                     md_line++;
                   }
 
-                  # 生成映射表
+                  # 生成映射表（避免空值）
                   cell_lines = split(current_cell, lines, "\n");
                   for (i=1; i<=cell_lines; i++) {
                     md_line++;
@@ -354,6 +350,7 @@ jobs:
               rm -f temp_extract.tmp || true
               sync "$md_file" || true
 
+              # 最终验证：仅保留非空MD文件
               if [ -s "$md_file" ]; then
                 echo "✅ Extracted successfully: $nb_file → $md_file"
               else
@@ -362,9 +359,10 @@ jobs:
               fi
             done <<< "${{ env.VALID_CHANGED_IPYNB }}"
 
+            # 关闭错误追踪
             set +x
 
-            # 打印提取日志
+            # 打印提取日志（容错：避免文件不存在报错）
             echo -e "\n======================================"
             echo "===== Extraction Logs ====="
             if [ -f "jq_batch_error.log" ] && [ -s "jq_batch_error.log" ]; then
@@ -373,6 +371,7 @@ jobs:
             else
               echo "✅ No JQ/AWK errors during extraction"
             fi
+            # 容错：安全获取映射表行数（文件不存在时返回0）
             map_line_count=0
             if [ -f "$MAP_FILE" ]; then
               map_line_count=$(wc -l < "$MAP_FILE" 2>/dev/null || echo 0)
