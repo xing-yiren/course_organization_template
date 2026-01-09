@@ -245,138 +245,87 @@ jobs:
             echo "TARGET_DIR=$TARGET_DIR" >> "$GITHUB_ENV"
             echo "MAP_FILE=$MAP_FILE" >> "$GITHUB_ENV"
 
-            # 容错：目录创建失败时重试
+            # 初始化目录和文件（CI环境容错）
             mkdir -p "$TARGET_DIR" || { echo "⚠️ Failed to create $TARGET_DIR, exit"; exit 0; }
-
-            # 清理旧文件（容错：忽略删除不存在的文件）
             rm -rf "$TARGET_DIR"/* || true
             rm -f "$MAP_FILE" jq_batch_error.log temp_extract.tmp || true
 
-            # 无改动 .ipynb 则直接退出（提前兜底）
+            # 无改动 .ipynb 则直接退出
             if [ -z "${{ env.VALID_CHANGED_IPYNB }}" ]; then
               echo "ℹ️  No changed .ipynb files to process, skipping extraction"
               exit 0
             fi
 
-            # 遍历 PR 改动的 .ipynb 文件（核心提取逻辑）
+            # 遍历 PR 改动的 .ipynb 文件
             while IFS= read -r nb_file; do
-              # 基础校验（增强容错，跳过无效文件）
-              if [ -z "$nb_file" ] || [[ "$nb_file" =~ /\./ ]] || [ ! -f "$nb_file" ] || [ ! -s "$nb_file" ]; then
-                echo "ℹ️  File invalid/empty, skipping: $nb_file"
+              # 基础校验（CI 环境增强容错）
+              if [ -z "$nb_file" ] || [ ! -f "$nb_file" ] || [ ! -s "$nb_file" ]; then
+                echo "ℹ️  Skip invalid file: $nb_file" >> "$ERROR_LOG"
                 continue
               fi
 
-              # 生成目标 MD 文件路径（处理特殊字符+容错）
-              if command -v realpath &> /dev/null; then
-                nb_relpath=$(realpath --relative-to=. "$nb_file" 2>/dev/null || echo "$nb_file")
-              else
-                nb_relpath=$(echo "$nb_file" | sed 's|^./||' 2>/dev/null || echo "$nb_file")
-              fi
+              # 生成目标 MD 路径
+              nb_relpath="${nb_file#./}"
               md_file="$TARGET_DIR/${nb_relpath%.ipynb}.md"
-              # 容错：创建目录失败时跳过当前文件
-              mkdir -p "$(dirname "$md_file")" || { echo "⚠️ Failed to create dir for $md_file, skipping"; continue; }
-              > "$md_file"  # 清空目标文件（容错：忽略空文件）
+              mkdir -p "$(dirname "$md_file")" || { echo "⚠️ Skip create dir for $md_file"; continue; }
+              > "$md_file"
 
-              # Step 1: 提取Markdown单元格（兼容所有jq版本+容错）
-              # 核心：用map+index替代foreach，避免jq版本问题
-              jq -r --arg nb_relpath "$nb_relpath" '
-                [.cells[] | select(.cell_type == "markdown")] as $md_cells
-                | if $md_cells | length == 0 then ""
-                  else $md_cells[] | . as $cell
-                      | index($md_cells) as $cell_idx
-                      | "<!-- ORIGIN: \($nb_relpath) (cell: \($cell_idx)) -->\n" +
-                        (
-                          $cell.source
-                          | if type == "array" then map(.) | join("") else . end
-                        ) + "\n<!-- CELL_BOUNDARY -->"
-                  end
-              ' "$nb_file" > temp_extract.tmp 2>> jq_batch_error.log || {
-                echo "⚠️ JQ failed for $nb_file, skipping"
-                rm -f temp_extract.tmp
+              # JQ 提取（带 cell 索引标记）
+              markdown_content=$(jq -r '
+                try (
+                  .cells | to_entries[] |
+                  select(.value.cell_type == "markdown") |
+                  "<!-- CELL_IDX: \(.key) -->\n" +
+                  (.value.source | if type == "array" then join("") else tostring end)
+                ) catch ""
+              ' "$nb_file" 2>> "$ERROR_LOG")
+
+              # 无内容则跳过
+              if [ -z "$markdown_content" ]; then
+                echo "ℹ️  No markdown content: $nb_file" >> "$ERROR_LOG"
+                rm -f "$md_file"
                 continue
-              }
+              fi
 
-              # Step 2: 处理提取内容（awk容错+避免空值）
-              awk -v nb_file="$nb_file" -v map_file="$MAP_FILE" -v md_file="$md_file" '
-                BEGIN {
-                  RS = "<!-- CELL_BOUNDARY -->"
-                  first_cell = 1
-                  md_line = 0
-                  cell_idx = "unknown"  # 兜底默认值
-                }
-                $0 != "" {
-                  # 清理首尾空行
-                  gsub(/^[\n\r]+/, "");
-                  gsub(/[\n\r]+$/, "");
-                  current_cell = $0;
-
-                  # 提取cell索引（增强匹配+容错）
-                  if (match(current_cell, /^<!-- ORIGIN: .* \(cell: ([0-9]+)\) -->$/, parts)) {
-                    cell_idx = parts[1];
-                    print current_cell >> md_file;
-                    md_line++;
-                    next;
-                  }
-
-                  # 跳过空内容
-                  if (current_cell == "") {
-                    continue;
-                  }
-
-                  # 写入内容（容错）
-                  if (first_cell == 1) {
-                    print current_cell >> md_file;
-                    first_cell = 0;
-                  } else {
-                    print "" >> md_file;
-                    print current_cell >> md_file;
-                    md_line++;
-                  }
-
-                  # 生成映射表（避免空值）
-                  cell_lines = split(current_cell, lines, "\n");
-                  for (i=1; i<=cell_lines; i++) {
-                    md_line++;
-                    print nb_file "," cell_idx "," md_file "," md_line >> map_file;
-                  }
-                }
-              ' temp_extract.tmp 2>> jq_batch_error.log || {
-                echo "⚠️ AWK failed for $nb_file, skipping"
-                rm -f temp_extract.tmp
-                continue
-              }
-
-              # 清理临时文件+验证结果
-              rm -f temp_extract.tmp || true
+              # 写入 MD 文件
+              echo "$markdown_content" > "$md_file"
               sync "$md_file" || true
 
-              # 最终验证：仅保留非空MD文件
-              if [ -s "$md_file" ]; then
-                echo "✅ Extracted successfully: $nb_file → $md_file"
-              else
-                rm -f "$md_file" || true
-                echo "ℹ️  No valid markdown content: $nb_file"
-              fi
-            done <<< "${{ env.VALID_CHANGED_IPYNB }}"
+              # 纯 Shell 生成映射表
+              md_line=0
+              cell_idx=0  # 默认值
+              while IFS= read -r line; do
+                md_line=$((md_line + 1))
 
-            # 关闭错误追踪
+                # 解析 cell 索引标记
+                if echo "$line" | grep -q '<!-- CELL_IDX: [0-9]\+ -->'; then
+                  cell_idx=$(echo "$line" | cut -d ':' -f 2 | cut -d ' ' -f 2)
+                  continue
+                fi
+
+                # 写入映射表
+                echo "$nb_file,$cell_idx,$md_file,$md_line" >> "$MAP_FILE" || true
+              done < "$md_file"
+
+              echo "✅ Extracted: $nb_file → $md_file"
+            done <<< "$VALID_CHANGED_IPYNB"
+
+            # 关闭错误追踪，打印提取日志
             set +x
-
-            # 打印提取日志（容错：避免文件不存在报错）
             echo -e "\n======================================"
-            echo "===== Extraction Logs ====="
-            if [ -f "jq_batch_error.log" ] && [ -s "jq_batch_error.log" ]; then
-              echo "❌ JQ/AWK Errors:"
-              cat jq_batch_error.log
+            echo "===== Extraction Logs ======"
+            if [ -s "$ERROR_LOG" ]; then
+              echo "❌ Skipped files (errors):"
+              cat "$ERROR_LOG" | sort | uniq
             else
-              echo "✅ No JQ/AWK errors during extraction"
+              echo "✅ No extraction errors"
             fi
-            # 容错：安全获取映射表行数（文件不存在时返回0）
+            # 安全获取映射表行数
             map_line_count=0
             if [ -f "$MAP_FILE" ]; then
               map_line_count=$(wc -l < "$MAP_FILE" 2>/dev/null || echo 0)
             fi
-            echo -e "✅ Mapping file: $MAP_FILE (lines: $map_line_count)"
+            echo "✅ Mapping file: $MAP_FILE (lines: $map_line_count)"
             echo "======================================"
 
         - name: Run markdownlint (PR changed .md + extracted MD)
