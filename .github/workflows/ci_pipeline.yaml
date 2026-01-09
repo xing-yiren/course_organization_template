@@ -241,14 +241,16 @@ jobs:
             # 核心配置（导出为环境变量，避免未定义）
             TARGET_DIR="./temp_md"
             MAP_FILE="./md_ipynb_mapping.log"
+            ERROR_LOG="./extract_error.log"
             # 确保变量导出，避免后续步骤引用未定义
             echo "TARGET_DIR=$TARGET_DIR" >> "$GITHUB_ENV"
             echo "MAP_FILE=$MAP_FILE" >> "$GITHUB_ENV"
 
-            # 初始化目录和文件（CI环境容错）
+            # 初始化目录和文件
             mkdir -p "$TARGET_DIR" || { echo "⚠️ Failed to create $TARGET_DIR, exit"; exit 0; }
             rm -rf "$TARGET_DIR"/* || true
             rm -f "$MAP_FILE" jq_batch_error.log temp_extract.tmp || true
+            rm -f "$MAP_FILE" "$ERROR_LOG" || true
 
             # 无改动 .ipynb 则直接退出
             if [ -z "${{ env.VALID_CHANGED_IPYNB }}" ]; then
