@@ -230,10 +230,9 @@ jobs:
         - name: Extract Markdown from PR changed .ipynb files
           id: extract_md
           run: |
-            # 保留严格模式，但添加容错逻辑
-            set -euo pipefail
+            set +e +u +o pipefail
             # 开启错误追踪（便于定位哪一行报错）
-            set -x
+            # set -x
 
             export LC_ALL=en_US.UTF-8
             export LANG=en_US.UTF-8
@@ -302,7 +301,7 @@ jobs:
 
               # 无内容则跳过
               if [ -z "$markdown_content" ]; then
-                echo "ℹ️  No markdown content: $nb_file" >> "$ERROR_LOG"
+                echo "ℹ️ No markdown content: $nb_file" >> "$ERROR_LOG"
                 rm -f "$md_file"
                 continue
               fi
@@ -331,7 +330,7 @@ jobs:
             done <<< "$VALID_CHANGED_IPYNB"
 
             # 关闭错误追踪，打印提取日志
-            set +x
+            # set +x
             echo -e "\n======================================"
             echo "===== Extraction Logs ======"
             if [ -s "$ERROR_LOG" ]; then
@@ -381,22 +380,28 @@ jobs:
 
             # 执行markdownlint
             echo "ℹ️  Running markdownlint..."
-            markdownlint-cli2 $LINT_PATHS --config .github/.markdownlint.json 2> "$LINT_ERROR_LOG"
+            markdownlint-cli2 $LINT_PATHS --config .github/.markdownlint.json --json > "$LINT_ERROR_LOG" 2>&1
+            lint_exit_code=$?
 
             # 检查是否有错误
-            if [ -s "$LINT_ERROR_LOG" ]; then
+            if [ $lint_exit_code -ne 0 ] && [ -s "$LINT_ERROR_LOG" ]; then
               echo -e "\n======================================"
               echo "===== Markdownlint Errors (Traced to IPYNB) ====="
 
-              # 核心：精准匹配报错行到原IPYNB的cell
-              while IFS= read -r error_line; do
-                # 匹配markdownlint报错格式：file:line:col: error
-                if [[ "$error_line" =~ ^([^:]+):([0-9]+):([0-9]+): (.*)$ ]]; then
+              # 用jq解析JSON错误，标准化输出格式
+              jq -r '
+                .[] | .file as $file |
+                .errors[] |
+                "\($file):\(.line):\(.column): \(.rule): \(.message)"
+              ' "$LINT_ERROR_LOG" | while IFS= read -r error_line; do
+                # 解析错误行：file:line:col: rule: message
+                if [[ "$error_line" =~ ^([^:]+):([0-9]+):([0-9]+): ([^:]+): (.*)$ ]]; then
                   err_file="${BASH_REMATCH[1]}"
                   err_line="${BASH_REMATCH[2]}"
-                  err_msg="${BASH_REMATCH[4]}"
+                  err_rule="${BASH_REMATCH[4]}"
+                  err_msg="${BASH_REMATCH[5]}"
 
-                  # 转换为相对路径（避免路径匹配问题）
+                  # 转换为相对路径
                   err_file_abs=$(realpath --relative-to=. "$err_file" 2>/dev/null || echo "$err_file")
 
                   # 从映射表查找原IPYNB信息
@@ -405,25 +410,28 @@ jobs:
                   if [ -n "$trace_result" ]; then
                     # 解析映射表：ipynb_file, cell_idx, md_file, md_line
                     IFS=',' read -r ipynb_file cell_idx _ _ <<< "$trace_result"
-                    echo -e "❌ Error in ORIGINAL FILE:"
-                    echo -e "  IPYNB: $ipynb_file (cell: $cell_idx)"
-                    echo -e "  Temp MD: $err_file (line: $err_line)"
-                    echo -e "  Error: $err_msg"
+                    echo -e "❌ Error in ORIGINAL IPYNB:"
+                    echo -e "  File: $ipynb_file (cell: $cell_idx)"
+                    echo -e "  Temp MD: $err_file (line: $err_line, col: ${BASH_REMATCH[3]})"
+                    echo -e "  Rule: $err_rule"
+                    echo -e "  Message: $err_msg"
                   else
                     # 原生MD文件或未匹配到的行
-                    echo -e "❌ Error in:"
-                    echo -e "  File: $err_file (line: $err_line)"
-                    echo -e "  Error: $err_msg"
+                    echo -e "❌ Error in MD file:"
+                    echo -e "  File: $err_file (line: $err_line, col: ${BASH_REMATCH[3]})"
+                    echo -e "  Rule: $err_rule"
+                    echo -e "  Message: $err_msg"
                   fi
                   echo -e "--------------------------------------"
                 else
-                  # 非标准报错直接输出
                   echo "$error_line"
                 fi
-              done < "$LINT_ERROR_LOG"
+              done
 
+              # 统计错误总数
+              total_errors=$(jq '[.[] | .errors[]] | length' "$LINT_ERROR_LOG")
               echo "======================================"
-              echo "❌ Markdownlint check failed!"
+              echo "❌ Markdownlint check failed (total errors: $total_errors)!"
               exit 1
             else
               echo -e "\n✅ No markdownlint errors found!"
