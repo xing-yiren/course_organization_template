@@ -262,7 +262,15 @@ jobs:
             while IFS= read -r nb_file; do
               # 基础校验（CI 环境增强容错）
               if [ -z "$nb_file" ] || [ ! -f "$nb_file" ] || [ ! -s "$nb_file" ]; then
-                echo "ℹ️  Skip invalid file: $nb_file" >> "$ERROR_LOG"
+                echo "ℹ️  Skip invalid/empty file: $nb_file" >> "$ERROR_LOG"
+                continue
+              fi
+
+              # 用 jq . 快速校验 JSON 是否可解析，静默执行
+              if ! jq . "$nb_file" > /dev/null 2>&1; then
+                error_msg="JSON parse failed (corrupted file)"
+                echo "❌ Skip $nb_file: $error_msg"
+                echo "ERROR: $nb_file - $error_msg" >> "$ERROR_LOG"
                 continue
               fi
 
@@ -272,7 +280,7 @@ jobs:
               mkdir -p "$(dirname "$md_file")" || { echo "⚠️ Skip create dir for $md_file"; continue; }
               > "$md_file"
 
-              # JQ 提取（带 cell 索引标记）
+              # JQ 提取并保存退出码（带 cell 索引标记）
               markdown_content=$(jq -r '
                 try (
                   .cells | to_entries[] |
@@ -281,6 +289,16 @@ jobs:
                   (.value.source | if type == "array" then join("") else tostring end)
                 ) catch ""
               ' "$nb_file" 2>> "$ERROR_LOG")
+              jq_exit_code=$?
+
+              # 如果 JQ 执行失败，跳过该文件
+              if [ $jq_exit_code -ne 0 ]; then
+                error_msg="JQ extraction failed (exit code: $jq_exit_code)"
+                echo "❌ Skip $nb_file: $error_msg"
+                echo "ERROR: $nb_file - $error_msg" >> "$ERROR_LOG"
+                rm -f "$md_file"  # 清理空文件
+                continue
+              fi
 
               # 无内容则跳过
               if [ -z "$markdown_content" ]; then
@@ -293,7 +311,7 @@ jobs:
               echo "$markdown_content" > "$md_file"
               sync "$md_file" || true
 
-              # 纯 Shell 生成映射表
+              # 生成映射表
               md_line=0
               cell_idx=0  # 默认值
               while IFS= read -r line; do
