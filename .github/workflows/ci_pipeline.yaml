@@ -350,31 +350,33 @@ jobs:
         - name: Run markdownlint (PR changed .md + extracted MD)
           if: ${{ env.VALID_CHANGED_IPYNB != '' || env.VALID_CHANGED_MD != '' }}
           run: |
-            # 关键1：开启 shell 调试，强制打印所有执行步骤
             set -x
 
-            # 安装 markdownlint-cli2 + 检查版本（确认安装成功）
+            # 安装并验证 markdownlint-cli2
             echo "ℹ️  Installing markdownlint-cli2..."
             npm install -g markdownlint-cli2
             markdownlint-cli2 --version || { echo "❌ markdownlint-cli2 install failed!"; exit 1; }
 
             # 核心配置
-            LINT_PATHS=""
+            LINT_PATHS=()  # 改用数组存储路径（避免通配符问题）
             MAP_FILE="./md_ipynb_mapping.log"
             LINT_ERROR_LOG="./markdownlint_error.log"
             LINT_RAW_LOG="./markdownlint_raw.log"
-            # 新增：捕获命令崩溃的 stderr
             CRASH_LOG="./markdownlint_crash.log"
 
-            # 1. 添加PR改动的原生MD文件
+            # 1. 添加PR改动的原生MD文件（数组追加）
             if [ -n "${{ env.VALID_CHANGED_MD }}" ]; then
-              RAW_MD=$(echo "${{ env.VALID_CHANGED_MD }}" | tr '\n' ' ' | sed 's/ $//')
-              LINT_PATHS+="$RAW_MD "
+              while IFS= read -r md_file; do
+                [ -n "$md_file" ] && LINT_PATHS+=("$md_file")
+              done <<< "${{ env.VALID_CHANGED_MD }}"
             fi
 
-            # 2. 添加提取的MD文件
+            # 2. 添加提取的MD文件（先展开通配符，再加入数组）
             if [ -n "${{ env.VALID_CHANGED_IPYNB }}" ]; then
-              LINT_PATHS+="temp_md/**/*.md"
+              # 先展开 temp_md/**/*.md 为实际文件列表
+              while IFS= read -r extracted_md; do
+                LINT_PATHS+=("$extracted_md")
+              done < <(find temp_md -type f -name "*.md" 2>/dev/null)
             fi
 
             # 清理旧日志
@@ -383,53 +385,44 @@ jobs:
             # 打印校验路径（确认路径正确）
             echo -e "\n======================================"
             echo "===== Markdownlint Check Paths ====="
-            echo "LINT_PATHS: $LINT_PATHS"
-            echo "Expanded paths:"
-            echo "$LINT_PATHS" | tr ' ' '\n' | grep -v '^$' | while IFS= read -r p; do
-              if [[ "$p" == *"**"* ]]; then
-                find "$(echo $p | cut -d '/' -f1)" -name "*.md" 2>/dev/null | while IFS= read -r fp; do echo "  - $fp"; done
-              else
-                echo "  - $p"
-              fi
+            echo "Total files to lint: ${#LINT_PATHS[@]}"
+            for p in "${LINT_PATHS[@]}"; do
+              echo "  - $p"
             done
             echo "======================================"
 
-            # 关键2：用 bash -c 包裹，强制捕获所有 stderr/stdout，即使命令崩溃
+            # 关键修复：用数组传参，避免通配符解析问题
+            if [ ${#LINT_PATHS[@]} -eq 0 ]; then
+              echo "ℹ️  No files to lint, skipping..."
+              exit 0
+            fi
+
             echo "ℹ️  Running markdownlint (raw output mode)..."
-            bash -c "markdownlint-cli2 $LINT_PATHS --config .github/.markdownlint.json" > "$LINT_RAW_LOG" 2>"$CRASH_LOG"
+            # 直接执行命令，用数组传参，无需 bash -c 包裹
+            markdownlint-cli2 "${LINT_PATHS[@]}" --config .github/.markdownlint.json > "$LINT_RAW_LOG" 2>"$CRASH_LOG"
             lint_exit_code=$?
 
-            # 关键3：强制打印所有日志（包括崩溃日志）
+            # 强制打印所有日志
             echo -e "\n======================================"
             echo "===== Markdownlint Execution Logs ====="
             echo "Exit code: $lint_exit_code"
             echo -e "\n👉 Crash Log (stderr):"
-            if [ -s "$CRASH_LOG" ]; then
-              cat "$CRASH_LOG"
-            else
-              echo "⚠️  No crash log (command may have no stderr output)"
-            fi
+            [ -s "$CRASH_LOG" ] && cat "$CRASH_LOG" || echo "⚠️  No crash log"
             echo -e "\n👉 Raw Log (stdout):"
-            if [ -s "$LINT_RAW_LOG" ]; then
-              cat "$LINT_RAW_LOG"
-            else
-              echo "⚠️  No raw log (command may have no stdout output)"
-            fi
+            [ -s "$LINT_RAW_LOG" ] && cat "$LINT_RAW_LOG" || echo "⚠️  No raw log"
             echo "======================================"
 
-            # 关键4：兜底方案——如果 markdownlint 崩溃，改用简化版校验
+            # 最终判断
             if [ $lint_exit_code -ne 0 ]; then
-              # 检查配置文件是否存在
+              # 检查配置文件
               if [ ! -f ".github/.markdownlint.json" ]; then
                 echo "❌ Config file missing: .github/.markdownlint.json"
-                # 临时使用默认规则（无配置文件）
-                echo "ℹ️  Fallback to default markdownlint rules..."
-                bash -c "markdownlint-cli2 $LINT_PATHS" > "$LINT_RAW_LOG" 2>"$CRASH_LOG"
+                echo "ℹ️  Retry with default rules..."
+                markdownlint-cli2 "${LINT_PATHS[@]}" > "$LINT_RAW_LOG" 2>"$CRASH_LOG"
                 lint_exit_code=$?
               fi
 
-              # 最终判断
-              total_errors=$(grep -c ":" "$LINT_RAW_LOG" "$CRASH_LOG" 2>/dev/null || echo "unknown")
+              total_errors=$(grep -cE ':[0-9]+:[0-9]+:' "$LINT_RAW_LOG" "$CRASH_LOG" 2>/dev/null || echo "unknown")
               echo "======================================"
               echo "❌ Markdownlint check failed (exit code: $lint_exit_code, errors: $total_errors)!"
               exit 1
@@ -438,7 +431,6 @@ jobs:
               exit 0
             fi
 
-            # 关闭调试
             set +x
 
         - name: Skip Markdownlint (no files)
