@@ -402,14 +402,16 @@ jobs:
                 ERR_BASE=$(echo "$err_line" | cut -d' ' -f1)  # 提取 file:line[:col] 部分
                 ERR_MSG=$(echo "$err_line" | cut -d' ' -f2-)   # 提取错误信息部分
 
-                # 提取文件路径（直到最后一个":"前的部分）
-                MD_FILE=$(echo "$ERR_BASE" | rev | cut -d':' -f2- | rev)
-                # 提取行号（最后一个":"后的数字）
+                # 提取文件路径，循环去掉最后一个":"及后面的内容，直到路径无数字
+                MD_FILE="$ERR_BASE"
+                while [[ "$MD_FILE" =~ :[0-9]+$ ]]; do
+                  MD_FILE=$(echo "$MD_FILE" | rev | cut -d':' -f2- | rev)
+                done
+                # 提取行号：取最后一个":"后的数字（兼容 行号/行号:列号 两种格式）
                 MD_LINE=$(echo "$ERR_BASE" | rev | cut -d':' -f1 | rev)
-
-                # 过滤无效行号（非数字）
-                if ! [[ "$MD_LINE" =~ ^[0-9]+$ ]]; then
-                  continue
+                # 额外：如果行号不是纯数字（比如带列号），再切一次
+                if [[ "$MD_LINE" =~ :[0-9]+$ ]]; then
+                  MD_LINE=$(echo "$MD_LINE" | cut -d':' -f1)
                 fi
 
                 # 转换为相对路径（匹配映射表）
