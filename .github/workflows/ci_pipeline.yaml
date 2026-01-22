@@ -347,9 +347,15 @@ jobs:
             echo "✅ Mapping file: $MAP_FILE (lines: $map_line_count)"
             echo "======================================"
 
-        - name: Run markdownlint
+        - name: Run markdownlint (ultimate fix for output capture)
           if: ${{ env.VALID_CHANGED_IPYNB != '' || env.VALID_CHANGED_MD != '' }}
           run: |
+            # 关键1：关闭GitHub Actions的即时中断（允许非0 exit code继续执行）
+            set +e
+            # 关键2：强制刷新输出，禁用缓冲
+            export PYTHONUNBUFFERED=1
+            export NODE_UNBUFFERED=1
+
             # 1. 安装稳定版 markdownlint-cli
             npm install -g markdownlint-cli@0.39.0
 
@@ -373,20 +379,20 @@ jobs:
             done
             echo "======================================"
 
-            # 4. 关键修复：用变量直接捕获所有输出（绕过文件重定向）
+            # 4. 终极捕获：用子shell+tee强制输出（即使命令失败）
             echo -e "\n===== Markdownlint Raw Output ====="
-            # 用 () 捕获 stdout+stderr 到变量，同时直接输出到控制台
-            MD_OUTPUT=$(markdownlint $LINT_GLOBS --config .github/.markdownlint.json 2>&1)
+            # 用tee同时输出到控制台+临时文件，set +e确保执行完
+            markdownlint $LINT_GLOBS --config .github/.markdownlint.json 2>&1 | tee markdownlint_force.log
             LINT_EXIT_CODE=$?
-            # 强制打印捕获的输出（不管是否为空）
-            echo "$MD_OUTPUT"
+            # 强制打印临时文件内容（双重保障）
+            cat markdownlint_force.log
             echo "======================================"
 
-            # 5. 错误溯源到IPYNB
+            # 5. 错误溯源到IPYNB（即使有错误也执行）
             if [ $LINT_EXIT_CODE -ne 0 ]; then
               echo -e "\n===== Markdownlint Errors (Traced to IPYNB) ====="
-              # 解析变量中的错误行（而非文件）
-              echo "$MD_OUTPUT" | grep -E '^.+:[0-9]+: ' | while IFS= read -r err_line; do
+              # 解析强制日志文件中的错误行
+              grep -E '^.+:[0-9]+: ' markdownlint_force.log | while IFS= read -r err_line; do
                 MD_FILE=$(echo "$err_line" | awk -F ':' '{print $1}')
                 MD_LINE=$(echo "$err_line" | awk -F ':' '{print $2}')
                 ERR_MSG=$(echo "$err_line" | cut -d':' -f3- | sed 's/^ //')
@@ -414,12 +420,14 @@ jobs:
                 fi
                 echo -e "--------------------------------------"
               done
-              exit 1
+              # 最后手动退出，确保CI状态正确
+              exit $LINT_EXIT_CODE
             else
               echo -e "\n✅ All files passed markdownlint check!"
               exit 0
             fi
           shell: bash
+          continue-on-error: false  # 确保最终错误能让CI失败
 
         - name: Skip Markdownlint (no files)
           if: ${{ env.VALID_CHANGED_IPYNB == '' && env.VALID_CHANGED_MD == '' }}
