@@ -460,6 +460,7 @@ jobs:
               exit 0
             fi
           shell: bash
+          continue-on-error: false
 
         - name: Skip Markdownlint (no files)
           if: ${{ env.VALID_CHANGED_IPYNB == '' && env.VALID_CHANGED_MD == '' }}
