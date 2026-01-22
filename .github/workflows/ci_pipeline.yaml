@@ -350,10 +350,10 @@ jobs:
         - name: Run markdownlint (PR changed .md + extracted MD)
           if: ${{ env.VALID_CHANGED_IPYNB != '' || env.VALID_CHANGED_MD != '' }}
           run: |
-            # 1. 极简安装（和你最初能运行的版本一致）
+            # 1. 极简安装
             npm install -g markdownlint-cli2
 
-            # 2. 核心：保留通配符，不展开文件列表（关键！）
+            # 2. 核心：保留通配符，不展开文件列表
             LINT_GLOBS=""
             MAP_FILE="./md_ipynb_mapping.log"
 
@@ -363,7 +363,7 @@ jobs:
               LINT_GLOBS+="$RAW_MD_GLOBS "
             fi
 
-            # 添加提取的MD文件（保留通配符，不展开）
+            # 添加提取的MD文件（保留通配符）
             if [ -n "${{ env.VALID_CHANGED_IPYNB }}" ]; then
               LINT_GLOBS+="temp_md/**/*.md"
             fi
@@ -371,52 +371,54 @@ jobs:
             # 清理末尾空格
             LINT_GLOBS=$(echo "$LINT_GLOBS" | sed 's/ $//')
 
-            # 3. 打印路径（和你最初的版本一致）
+            # 3. 打印路径
             echo "===== Markdownlint Check Paths ====="
             echo "$LINT_GLOBS" | tr ' ' '\n' | while IFS= read -r path; do
               [ -n "$path" ] && echo "  - $path"
             done
             echo "======================================"
 
-            # 4. 执行markdownlint（核心：直接执行，不通配符展开）
-            # 把所有输出保存到日志，同时输出到控制台
-            markdownlint-cli2 $LINT_GLOBS --config .github/.markdownlint.json > markdownlint_full.log 2>&1 | tee markdownlint_full.log
-            LINT_EXIT_CODE=${PIPESTATUS[0]}
+            # 4. 执行markdownlint（保存所有输出）
+            markdownlint-cli2 $LINT_GLOBS --config .github/.markdownlint.json > markdownlint_full.log 2>&1
+            LINT_EXIT_CODE=$?
 
-            # 5. 核心：错误溯源到IPYNB（仅解析错误行）
+            # 5. 错误溯源（纯POSIX语法，兼容dash/sh）
             if [ $LINT_EXIT_CODE -ne 0 ]; then
               echo -e "\n===== Markdownlint Errors (Traced to IPYNB) ====="
-              # 只解析错误行，忽略无关输出
+              # 用sed/awk解析错误行，替代bash正则
               grep -E '^.+:[0-9]+:[0-9]+: ' markdownlint_full.log | while IFS= read -r err_line; do
-                # 提取MD文件和行号
-                if [[ "$err_line" =~ ^([^:]+):([0-9]+):[0-9]+: (.*)$ ]]; then
-                  MD_FILE="${BASH_REMATCH[1]}"
-                  MD_LINE="${BASH_REMATCH[2]}"
-                  ERR_MSG="${BASH_REMATCH[3]}"
+                # 用awk提取MD文件、行号、错误信息（兼容所有shell）
+                MD_FILE=$(echo "$err_line" | awk -F ':' '{print $1}')
+                MD_LINE=$(echo "$err_line" | awk -F ':' '{print $2}')
+                ERR_MSG=$(echo "$err_line" | cut -d':' -f4- | sed 's/^ //')
 
-                  # 转换为相对路径（匹配映射表）
+                # 转换为相对路径
+                if command -v realpath >/dev/null 2>&1; then
                   MD_FILE_REL=$(realpath --relative-to=. "$MD_FILE" 2>/dev/null || echo "$MD_FILE")
-
-                  # 溯源到IPYNB
-                  IPYNB_INFO=$(grep ",$MD_FILE_REL,$MD_LINE," "$MAP_FILE" 2>/dev/null | head -n1)
-                  if [ -n "$IPYNB_INFO" ]; then
-                    IPYNB_FILE=$(echo "$IPYNB_INFO" | cut -d',' -f1)
-                    CELL_IDX=$(echo "$IPYNB_INFO" | cut -d',' -f2)
-                    echo -e "❌ IPYNB: $IPYNB_FILE (cell: $CELL_IDX)"
-                    echo -e "   MD:    $MD_FILE (line: $MD_LINE)"
-                    echo -e "   Error: $ERR_MSG"
-                  else
-                    echo -e "❌ MD File: $MD_FILE (line: $MD_LINE)"
-                    echo -e "   Error: $ERR_MSG"
-                  fi
-                  echo "--------------------------------------"
+                else
+                  MD_FILE_REL="$MD_FILE"
                 fi
+
+                # 溯源到IPYNB（用grep+cut，避免bash语法）
+                IPYNB_INFO=$(grep ",$MD_FILE_REL,$MD_LINE," "$MAP_FILE" 2>/dev/null | head -n1)
+                if [ -n "$IPYNB_INFO" ]; then
+                  IPYNB_FILE=$(echo "$IPYNB_INFO" | cut -d',' -f1)
+                  CELL_IDX=$(echo "$IPYNB_INFO" | cut -d',' -f2)
+                  echo -e "❌ IPYNB: $IPYNB_FILE (cell: $CELL_IDX)"
+                  echo -e "   MD:    $MD_FILE (line: $MD_LINE)"
+                  echo -e "   Error: $ERR_MSG"
+                else
+                  echo -e "❌ MD File: $MD_FILE (line: $MD_LINE)"
+                  echo -e "   Error: $ERR_MSG"
+                fi
+                echo "--------------------------------------"
               done
               exit 1
             else
               echo -e "\n✅ All files passed markdownlint check!"
               exit 0
             fi
+          shell: bash
 
         - name: Skip Markdownlint (no files)
           if: ${{ env.VALID_CHANGED_IPYNB == '' && env.VALID_CHANGED_MD == '' }}
