@@ -350,8 +350,8 @@ jobs:
         - name: Run markdownlint (PR changed .md + extracted MD)
           if: ${{ env.VALID_CHANGED_IPYNB != '' || env.VALID_CHANGED_MD != '' }}
           run: |
-            # 1. 极简安装
-            npm install -g markdownlint-cli2
+            # 1. 安装稳定版 markdownlint-cli
+            npm install -g markdownlint-cli@0.39.0  # 长期稳定版本
 
             # 2. 核心：保留通配符，不展开文件列表
             LINT_GLOBS=""
@@ -378,19 +378,25 @@ jobs:
             done
             echo "======================================"
 
-            # 4. 执行markdownlint（保存所有输出）
-            markdownlint-cli2 $LINT_GLOBS --config .github/.markdownlint.json > markdownlint_full.log 2>&1
+            # 4. 执行 markdownlint
+            # 直接输出到控制台，同时保存日志
+            markdownlint $LINT_GLOBS --config .github/.markdownlint.json > markdownlint_full.log 2>&1
             LINT_EXIT_CODE=$?
 
-            # 5. 错误溯源（纯POSIX语法，兼容dash/sh）
+            # 5. 强制打印所有输出（不管是否报错）
+            echo -e "\n===== Markdownlint Full Output ====="
+            cat markdownlint_full.log
+            echo "======================================"
+
+            # 6. 错误溯源到 IPYNB
             if [ $LINT_EXIT_CODE -ne 0 ]; then
               echo -e "\n===== Markdownlint Errors (Traced to IPYNB) ====="
-              # 用sed/awk解析错误行，替代bash正则
-              grep -E '^.+:[0-9]+:[0-9]+: ' markdownlint_full.log | while IFS= read -r err_line; do
-                # 用awk提取MD文件、行号、错误信息（兼容所有shell）
+              # 解析 markdownlint-cli 的错误行
+              grep -E '^.+:[0-9]+: ' markdownlint_full.log | while IFS= read -r err_line; do
+                # 用 awk 提取信息
                 MD_FILE=$(echo "$err_line" | awk -F ':' '{print $1}')
                 MD_LINE=$(echo "$err_line" | awk -F ':' '{print $2}')
-                ERR_MSG=$(echo "$err_line" | cut -d':' -f4- | sed 's/^ //')
+                ERR_MSG=$(echo "$err_line" | cut -d':' -f3- | sed 's/^ //')
 
                 # 转换为相对路径
                 if command -v realpath >/dev/null 2>&1; then
@@ -399,7 +405,7 @@ jobs:
                   MD_FILE_REL="$MD_FILE"
                 fi
 
-                # 溯源到IPYNB（用grep+cut，避免bash语法）
+                # 溯源到 IPYNB
                 IPYNB_INFO=$(grep ",$MD_FILE_REL,$MD_LINE," "$MAP_FILE" 2>/dev/null | head -n1)
                 if [ -n "$IPYNB_INFO" ]; then
                   IPYNB_FILE=$(echo "$IPYNB_INFO" | cut -d',' -f1)
