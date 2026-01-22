@@ -347,19 +347,17 @@ jobs:
             echo "✅ Mapping file: $MAP_FILE (lines: $map_line_count)"
             echo "======================================"
 
-        - name: Run markdownlint (ultimate fix for output capture)
+        - name: Run markdownlint (fix IPYNB error tracing)
           if: ${{ env.VALID_CHANGED_IPYNB != '' || env.VALID_CHANGED_MD != '' }}
           run: |
-            # 关键1：关闭GitHub Actions的即时中断（允许非0 exit code继续执行）
             set +e
-            # 关键2：强制刷新输出，禁用缓冲
             export PYTHONUNBUFFERED=1
             export NODE_UNBUFFERED=1
 
-            # 1. 安装稳定版 markdownlint-cli
+            # 1. 安装工具
             npm install -g markdownlint-cli@0.39.0
 
-            # 2. 构建校验路径（保留通配符）
+            # 2. 构建路径
             LINT_GLOBS=""
             MAP_FILE="./md_ipynb_mapping.log"
 
@@ -372,40 +370,60 @@ jobs:
             fi
             LINT_GLOBS=$(echo "$LINT_GLOBS" | sed 's/ $//')
 
-            # 3. 打印校验路径
+            # 3. 打印路径
             echo -e "\n===== Markdownlint Check Paths ====="
             echo "$LINT_GLOBS" | tr ' ' '\n' | while IFS= read -r path; do
               [ -n "$path" ] && echo "  - $path"
             done
             echo "======================================"
 
-            # 4. 终极捕获：用子shell+tee强制输出（即使命令失败）
+            # 4. 捕获原始输出
             echo -e "\n===== Markdownlint Raw Output ====="
-            # 用tee同时输出到控制台+临时文件，set +e确保执行完
             markdownlint $LINT_GLOBS --config .github/.markdownlint.json 2>&1 | tee markdownlint_force.log
             LINT_EXIT_CODE=$?
-            # 强制打印临时文件内容（双重保障）
             cat markdownlint_force.log
             echo "======================================"
 
-            # 5. 错误溯源到IPYNB（即使有错误也执行）
+            # 5. 错误溯源到IPYNB（核心修复：适配错误格式+调试）
             if [ $LINT_EXIT_CODE -ne 0 ]; then
               echo -e "\n===== Markdownlint Errors (Traced to IPYNB) ====="
-              # 解析强制日志文件中的错误行
-              grep -E '^.+:[0-9]+: ' markdownlint_force.log | while IFS= read -r err_line; do
-                MD_FILE=$(echo "$err_line" | awk -F ':' '{print $1}')
-                MD_LINE=$(echo "$err_line" | awk -F ':' '{print $2}')
-                ERR_MSG=$(echo "$err_line" | cut -d':' -f3- | sed 's/^ //')
+              echo -e "🔍 Debug: Raw error lines to parse:"
+              # 调试：先打印所有待解析的行，确认格式
+              cat markdownlint_force.log | grep -v "=====" | grep -v "🔍" | grep -v "Error:" | tee debug_raw_lines.log
+              echo -e "--------------------------------------"
 
-                # 转换为相对路径
+              # 核心修复：兼容markdownlint-cli的所有错误格式（覆盖MD022/MD012等）
+              # 错误格式1: file:line: error message（核心）
+              # 错误格式2: file:line:col: error message（兼容cli2）
+              # 错误格式3: file:line: code: error message（完整格式）
+              cat markdownlint_force.log | grep -E '^[^:]+:[0-9]+(:[0-9]+)?: .+' | while IFS= read -r err_line; do
+                # 调试：打印当前解析的行
+                echo -e "🔍 Parsing line: $err_line"
+
+                # 修复解析逻辑：兼容多种分隔符格式
+                # 提取文件路径（直到第一个":"）
+                MD_FILE=$(echo "$err_line" | cut -d':' -f1)
+                # 提取行号（第二个字段，不管是否有列号）
+                MD_LINE=$(echo "$err_line" | cut -d':' -f2 | sed 's/^ //g')
+                # 提取错误信息（第三个字段开始，去掉前缀空格）
+                ERR_MSG=$(echo "$err_line" | cut -d':' -f3- | sed 's/^ //g')
+
+                # 过滤空行号（避免无效解析）
+                if ! [[ "$MD_LINE" =~ ^[0-9]+$ ]]; then
+                  echo -e "⚠️  Skip invalid line number: $MD_LINE (line: $err_line)"
+                  continue
+                fi
+
+                # 转换为相对路径（匹配映射表）
                 if command -v realpath >/dev/null 2>&1; then
                   MD_FILE_REL=$(realpath --relative-to=. "$MD_FILE" 2>/dev/null || echo "$MD_FILE")
                 else
                   MD_FILE_REL="$MD_FILE"
                 fi
+                echo -e "🔍 Mapped MD file: $MD_FILE_REL (line: $MD_LINE)"
 
-                # 溯源到IPYNB
-                IPYNB_INFO=$(grep ",$MD_FILE_REL,$MD_LINE," "$MAP_FILE" 2>/dev/null | head -n1)
+                # 溯源到IPYNB（放宽匹配规则：包含MD文件+行号即可）
+                IPYNB_INFO=$(grep "$MD_FILE_REL" "$MAP_FILE" 2>/dev/null | grep "$MD_LINE" | head -n1)
                 if [ -n "$IPYNB_INFO" ]; then
                   IPYNB_FILE=$(echo "$IPYNB_INFO" | cut -d',' -f1)
                   CELL_IDX=$(echo "$IPYNB_INFO" | cut -d',' -f2)
@@ -414,20 +432,26 @@ jobs:
                   echo -e "  Temp MD File: $MD_FILE (line: $MD_LINE)"
                   echo -e "  Error: $ERR_MSG"
                 else
+                  # 原生MD文件（如cv/README.md）
                   echo -e "❌ Error in Native MD File:"
                   echo -e "  File: $MD_FILE (line: $MD_LINE)"
                   echo -e "  Error: $ERR_MSG"
                 fi
                 echo -e "--------------------------------------"
               done
-              # 最后手动退出，确保CI状态正确
+
+              # 调试：如果没解析到任何行，提示原因
+              if [ ! -s debug_raw_lines.log ] || [ $(cat debug_raw_lines.log | wc -l) -eq 0 ]; then
+                echo -e "⚠️  No valid error lines found! Check markdownlint output format."
+              fi
+
               exit $LINT_EXIT_CODE
             else
               echo -e "\n✅ All files passed markdownlint check!"
               exit 0
             fi
           shell: bash
-          continue-on-error: false  # 确保最终错误能让CI失败
+          continue-on-error: false
 
         - name: Skip Markdownlint (no files)
           if: ${{ env.VALID_CHANGED_IPYNB == '' && env.VALID_CHANGED_MD == '' }}
