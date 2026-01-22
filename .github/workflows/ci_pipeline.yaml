@@ -385,6 +385,8 @@ jobs:
             echo "======================================"
 
             # 5. 错误溯源到IPYNB（兼容所有错误格式）
+            echo -e "🔍 Debug: Mapping records for yolos MD file:"
+            grep -F "temp_md/llm/legacy/yolos/inference_yolos_object_detection.md" "$MAP_FILE"
             if [ $LINT_EXIT_CODE -ne 0 ]; then
               echo -e "\n===== Markdownlint Errors (Traced to IPYNB) ====="
 
