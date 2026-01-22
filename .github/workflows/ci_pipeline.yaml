@@ -378,7 +378,7 @@ jobs:
             echo "======================================"
 
             # 4. 捕获原始输出
-            markdownlint $LINT_GLOBS --config .github/.markdownlint.json 2>&1 | tee markdownlint_force.log
+            markdownlint $LINT_GLOBS --config .github/.markdownlint.json > markdownlint_force.log 2>&1
             LINT_EXIT_CODE=$?
 
             # 5. 错误溯源到IPYNB（兼容所有错误格式）
