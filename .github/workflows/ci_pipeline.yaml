@@ -424,16 +424,34 @@ jobs:
                 # 溯源到IPYNB（优先匹配）
                 IPYNB_FOUND="false"
                 if [ -f "$MAP_FILE" ]; then
-                  # 放宽匹配：只要映射表包含MD文件路径+行号
-                  IPYNB_INFO=$(grep -F "$MD_FILE_REL" "$MAP_FILE" | grep -F ",$MD_LINE," | head -n1)
-                  if [ -n "$IPYNB_INFO" ]; then
-                    IPYNB_FILE=$(echo "$IPYNB_INFO" | cut -d',' -f1)
-                    CELL_IDX=$(echo "$IPYNB_INFO" | cut -d',' -f2)
-                    echo -e "❌ Error in ORIGINAL IPYNB:"
-                    echo -e "  IPYNB File: $IPYNB_FILE (cell: $CELL_IDX)"
-                    echo -e "  Temp MD File: $MD_FILE_REL (line: $MD_LINE)"
-                    echo -e "  Error: $ERR_MSG"
-                    IPYNB_FOUND="true"
+                  # 1. 先找到该 MD 文件的所有映射记录
+                  ALL_MAPPINGS=$(grep -F "$MD_FILE_REL" "$MAP_FILE")
+                  if [ -n "$ALL_MAPPINGS" ]; then
+                    # 2. 遍历所有映射，找到「错误行号 ≤ 当前行号」的最大 cell 起始行
+                    MATCHED_MAPPING=""
+                    MAX_MAPPED_LINE=0
+                    while IFS= read -r mapping_line; do
+                      MAP_IPYNB=$(echo "$mapping_line" | cut -d',' -f1)
+                      MAP_CELL=$(echo "$mapping_line" | cut -d',' -f2)
+                      MAP_MD_LINE=$(echo "$mapping_line" | cut -d',' -f4)
+
+                      # 只比较数字行号
+                      if [[ "$MAP_MD_LINE" =~ ^[0-9]+$ ]] && [ "$MAP_MD_LINE" -le "$MD_LINE" ] && [ "$MAP_MD_LINE" -gt "$MAX_MAPPED_LINE" ]; then
+                        MAX_MAPPED_LINE="$MAP_MD_LINE"
+                        MATCHED_MAPPING="$mapping_line"
+                      fi
+                    done <<< "$ALL_MAPPINGS"
+
+                    # 3. 如果找到匹配的 cell，就用这个 cell 的信息
+                    if [ -n "$MATCHED_MAPPING" ]; then
+                      IPYNB_FILE=$(echo "$MATCHED_MAPPING" | cut -d',' -f1)
+                      CELL_IDX=$(echo "$MATCHED_MAPPING" | cut -d',' -f2)
+                      echo -e "❌ Error in ORIGINAL IPYNB (cell approximate):"
+                      echo -e "  IPYNB File: $IPYNB_FILE (cell: $CELL_IDX)"
+                      echo -e "  Temp MD File: $MD_FILE_REL (line: $MD_LINE, in cell $CELL_IDX)"
+                      echo -e "  Error: $ERR_MSG"
+                      IPYNB_FOUND="true"
+                    fi
                   fi
                 else
                   echo -e "⚠️  Mapping file $MAP_FILE not found! Skip IPYNB tracing."
