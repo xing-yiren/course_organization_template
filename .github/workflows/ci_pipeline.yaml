@@ -350,91 +350,73 @@ jobs:
         - name: Run markdownlint (PR changed .md + extracted MD)
           if: ${{ env.VALID_CHANGED_IPYNB != '' || env.VALID_CHANGED_MD != '' }}
           run: |
-            set -x
-
-            # 安装并验证 markdownlint-cli2
-            echo "ℹ️  Installing markdownlint-cli2..."
+            # 1. 极简安装（和你最初能运行的版本一致）
             npm install -g markdownlint-cli2
-            markdownlint-cli2 --version || { echo "❌ markdownlint-cli2 install failed!"; exit 1; }
 
-            # 核心配置：保留通配符传参 + 溯源所需的映射表
+            # 2. 核心：保留通配符，不展开文件列表（关键！）
             LINT_GLOBS=""
-            MAP_FILE="./md_ipynb_mapping.log"  # 提取步骤生成的映射表
-            LINT_ERROR_LOG="./markdownlint_error.log"  # 保存markdownlint的完整输出
-            LINT_CONFIG=".github/.markdownlint.json"
+            MAP_FILE="./md_ipynb_mapping.log"
 
-            # 1. 添加PR改动的原生MD文件
+            # 添加原生MD文件
             if [ -n "${{ env.VALID_CHANGED_MD }}" ]; then
               RAW_MD_GLOBS=$(echo "${{ env.VALID_CHANGED_MD }}" | tr '\n' ' ' | sed 's/ $//')
               LINT_GLOBS+="$RAW_MD_GLOBS "
             fi
 
-            # 2. 添加提取的MD文件（保留通配符）
+            # 添加提取的MD文件（保留通配符，不展开）
             if [ -n "${{ env.VALID_CHANGED_IPYNB }}" ]; then
               LINT_GLOBS+="temp_md/**/*.md"
             fi
 
-            # 清理旧日志
-            rm -f "$LINT_ERROR_LOG"
+            # 清理末尾空格
+            LINT_GLOBS=$(echo "$LINT_GLOBS" | sed 's/ $//')
 
-            # 打印校验路径
-            echo -e "\n======================================"
+            # 3. 打印路径（和你最初的版本一致）
             echo "===== Markdownlint Check Paths ====="
             echo "$LINT_GLOBS" | tr ' ' '\n' | while IFS= read -r path; do
               [ -n "$path" ] && echo "  - $path"
             done
             echo "======================================"
 
-            # 关键1：用通配符执行，并重定向所有输出到日志（保留错误信息）
-            echo "ℹ️  Running markdownlint..."
-            markdownlint-cli2 $LINT_GLOBS --config "$LINT_CONFIG" > "$LINT_ERROR_LOG" 2>&1
-            lint_exit_code=$?
+            # 4. 执行markdownlint（核心：直接执行，不通配符展开）
+            # 把所有输出保存到日志，同时输出到控制台
+            markdownlint-cli2 $LINT_GLOBS --config .github/.markdownlint.json > markdownlint_full.log 2>&1 | tee markdownlint_full.log
+            LINT_EXIT_CODE=${PIPESTATUS[0]}
 
-            # 关键2：解析错误日志，实现IPYNB cell溯源（核心mapping逻辑）
-            if [ $lint_exit_code -ne 0 ] && [ -s "$LINT_ERROR_LOG" ]; then
-              echo -e "\n======================================"
-              echo "===== Markdownlint Errors (Traced to IPYNB) ====="
+            # 5. 核心：错误溯源到IPYNB（仅解析错误行）
+            if [ $LINT_EXIT_CODE -ne 0 ]; then
+              echo -e "\n===== Markdownlint Errors (Traced to IPYNB) ====="
+              # 只解析错误行，忽略无关输出
+              grep -E '^.+:[0-9]+:[0-9]+: ' markdownlint_full.log | while IFS= read -r err_line; do
+                # 提取MD文件和行号
+                if [[ "$err_line" =~ ^([^:]+):([0-9]+):[0-9]+: (.*)$ ]]; then
+                  MD_FILE="${BASH_REMATCH[1]}"
+                  MD_LINE="${BASH_REMATCH[2]}"
+                  ERR_MSG="${BASH_REMATCH[3]}"
 
-              # 解析markdownlint的错误输出（兼容v0.20.0的格式）
-              grep -E '^.+:[0-9]+:[0-9]+: ' "$LINT_ERROR_LOG" | while IFS= read -r error_line; do
-                # 匹配格式：file:line:col: error message
-                if [[ "$error_line" =~ ^([^:]+):([0-9]+):([0-9]+): (.*)$ ]]; then
-                  err_file="${BASH_REMATCH[1]}"
-                  err_line="${BASH_REMATCH[2]}"
-                  err_msg="${BASH_REMATCH[4]}"
+                  # 转换为相对路径（匹配映射表）
+                  MD_FILE_REL=$(realpath --relative-to=. "$MD_FILE" 2>/dev/null || echo "$MD_FILE")
 
-                  # 转换为相对路径（匹配映射表的路径格式）
-                  err_file_rel=$(realpath --relative-to=. "$err_file" 2>/dev/null || echo "$err_file")
-
-                  # 核心mapping：从映射表查找原IPYNB信息
-                  trace_result=$(grep ",$err_file_rel,$err_line," "$MAP_FILE" 2>/dev/null | head -n1)
-                  if [ -n "$trace_result" ]; then
-                    # 解析映射表：ipynb_file, cell_idx, md_file, md_line
-                    IFS=',' read -r ipynb_file cell_idx _ _ <<< "$trace_result"
-                    echo -e "❌ Error in ORIGINAL IPYNB:"
-                    echo -e "  IPYNB File: $ipynb_file (cell: $cell_idx)"
-                    echo -e "  Temp MD File: $err_file (line: $err_line)"
-                    echo -e "  Error: $err_msg"
+                  # 溯源到IPYNB
+                  IPYNB_INFO=$(grep ",$MD_FILE_REL,$MD_LINE," "$MAP_FILE" 2>/dev/null | head -n1)
+                  if [ -n "$IPYNB_INFO" ]; then
+                    IPYNB_FILE=$(echo "$IPYNB_INFO" | cut -d',' -f1)
+                    CELL_IDX=$(echo "$IPYNB_INFO" | cut -d',' -f2)
+                    echo -e "❌ IPYNB: $IPYNB_FILE (cell: $CELL_IDX)"
+                    echo -e "   MD:    $MD_FILE (line: $MD_LINE)"
+                    echo -e "   Error: $ERR_MSG"
                   else
-                    # 原生MD文件或未匹配到的行
-                    echo -e "❌ Error in MD File:"
-                    echo -e "  File: $err_file (line: $err_line)"
-                    echo -e "  Error: $err_msg"
+                    echo -e "❌ MD File: $MD_FILE (line: $MD_LINE)"
+                    echo -e "   Error: $ERR_MSG"
                   fi
-                  echo -e "--------------------------------------"
+                  echo "--------------------------------------"
                 fi
               done
-
-              echo "======================================"
-              echo "❌ Markdownlint check failed!"
               exit 1
             else
-              # 无错误时打印结果
-              echo -e "\n✅ No markdownlint errors found!"
+              echo -e "\n✅ All files passed markdownlint check!"
               exit 0
             fi
-
-            set +x
 
         - name: Skip Markdownlint (no files)
           if: ${{ env.VALID_CHANGED_IPYNB == '' && env.VALID_CHANGED_MD == '' }}
