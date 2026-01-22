@@ -385,8 +385,6 @@ jobs:
             echo "======================================"
 
             # 5. 错误溯源到IPYNB（兼容所有错误格式）
-            echo -e "🔍 Debug: Mapping records for yolos MD file:"
-            grep -F "temp_md/llm/legacy/yolos/inference_yolos_object_detection.md" "$MAP_FILE"
             if [ $LINT_EXIT_CODE -ne 0 ]; then
               echo -e "\n===== Markdownlint Errors (Traced to IPYNB) ====="
 
@@ -444,13 +442,36 @@ jobs:
                       fi
                     done <<< "$ALL_MAPPINGS"
 
-                    # 3. 如果找到匹配的 cell，就用这个 cell 的信息
+                    # 3. 兜底逻辑：如果没匹配到，找最小的映射行（关键修正：提前保存兜底的匹配结果）
+                    FALLBACK_MAPPING=""
+                    MIN_MAPPED_LINE=999999
+                    if [ -z "$MATCHED_MAPPING" ] && [ -n "$ALL_MAPPINGS" ]; then
+                      while IFS= read -r mapping_line; do
+                        MAP_MD_LINE=$(echo "$mapping_line" | cut -d',' -f4)
+                        if [[ "$MAP_MD_LINE" =~ ^[0-9]+$ ]] && [ "$MAP_MD_LINE" -lt "$MIN_MAPPED_LINE" ]; then
+                          MIN_MAPPED_LINE="$MAP_MD_LINE"
+                          FALLBACK_MAPPING="$mapping_line"
+                        fi
+                      done <<< "$ALL_MAPPINGS"
+                    fi
+
+                    # 4. 优先处理正常匹配（最大行）
                     if [ -n "$MATCHED_MAPPING" ]; then
                       IPYNB_FILE=$(echo "$MATCHED_MAPPING" | cut -d',' -f1)
                       CELL_IDX=$(echo "$MATCHED_MAPPING" | cut -d',' -f2)
                       echo -e "❌ Error in ORIGINAL IPYNB (cell approximate):"
                       echo -e "  IPYNB File: $IPYNB_FILE (cell: $CELL_IDX)"
                       echo -e "  Temp MD File: $MD_FILE_REL (line: $MD_LINE, in cell $CELL_IDX)"
+                      echo -e "  Error: $ERR_MSG"
+                      IPYNB_FOUND="true"
+
+                    # 5. 再处理兜底匹配（最小行）
+                    elif [ -n "$FALLBACK_MAPPING" ]; then
+                      IPYNB_FILE=$(echo "$FALLBACK_MAPPING" | cut -d',' -f1)
+                      CELL_IDX=$(echo "$FALLBACK_MAPPING" | cut -d',' -f2)
+                      echo -e "❌ Error in ORIGINAL IPYNB (min line fallback):"
+                      echo -e "  IPYNB File: $IPYNB_FILE (cell: $CELL_IDX)"
+                      echo -e "  Temp MD File: $MD_FILE_REL (line: $MD_LINE, fallback to min mapped line $MIN_MAPPED_LINE)"
                       echo -e "  Error: $ERR_MSG"
                       IPYNB_FOUND="true"
                     fi
