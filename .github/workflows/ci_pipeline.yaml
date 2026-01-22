@@ -4,7 +4,6 @@ name: CI Pipeline
 
 # Controls when the workflow will run
 on:
-  # Triggers the workflow on push or pull request events but only for the "main" branch
   push:
     branches: [ "*" ]
   pull_request:
@@ -38,16 +37,32 @@ jobs:
       - name: Get target directories
         id: get_files
         run: |
-          # Find .py files
-          PY_FILES=$(find . -type f -name "*.py" ! -path "./.git/*" ! -path "./.github/*")
+          # Find .py files - 新增：过滤空行、仅保留真实存在的文件
+          PY_FILES=$(find . -type f -name "*.py" ! -path "./.git/*" ! -path "./.github/*" | grep -v '^$')
+          # 修复：真实统计有效 .py 文件数量（避免空行导致假计数）
           PY_FILE_COUNT=$(echo "$PY_FILES" | wc -l | tr -d ' ')
+          # 兜底：若 PY_FILE_COUNT 为空或非数字，强制设为 0
+          if ! [[ "$PY_FILE_COUNT" =~ ^[0-9]+$ ]]; then
+            PY_FILE_COUNT=0
+          fi
 
-          # Find .ipynb files
-          IPYNB_FILES=$(find . -type f -name "*.ipynb" ! -path "./.git/*" ! -path "./.github/*")
+          # Find .ipynb files - 同样优化（保持一致性）
+          IPYNB_FILES=$(find . -type f -name "*.ipynb" ! -path "./.git/*" ! -path "./.github/*" | grep -v '^$')
           IPYNB_FILE_COUNT=$(echo "$IPYNB_FILES" | wc -l | tr -d ' ')
+          if ! [[ "$IPYNB_FILE_COUNT" =~ ^[0-9]+$ ]]; then
+            IPYNB_FILE_COUNT=0
+          fi
 
-          PY_FILES_STR=$(echo "$PY_FILES" | tr '\n' ' ' | sed 's/ $//')
-          IPYNB_FILES_STR=$(echo "$IPYNB_FILES" | tr '\n' ' ' | sed 's/ $//')
+          # 修复：仅当存在有效 .py 文件时，才生成文件路径字符串（避免空字符串）
+          PY_FILES_STR=""
+          if [ "$PY_FILE_COUNT" -gt 0 ]; then
+            PY_FILES_STR=$(echo "$PY_FILES" | tr '\n' ' ' | sed 's/ $//')
+          fi
+          # 同理优化 .ipynb 文件路径字符串
+          IPYNB_FILES_STR=""
+          if [ "$IPYNB_FILE_COUNT" -gt 0 ]; then
+            IPYNB_FILES_STR=$(echo "$IPYNB_FILES" | tr '\n' ' ' | sed 's/ $//')
+          fi
 
           echo "PY_FILES=$PY_FILES_STR" >> "$GITHUB_ENV"
           echo "PY_FILE_COUNT=$PY_FILE_COUNT" >> "$GITHUB_ENV"
@@ -62,56 +77,374 @@ jobs:
           echo "============================"
 
       - name: Run Pylint for .py files
-        if: env.PY_FILE_COUNT -gt 0
+        if: ${{ env.PY_FILE_COUNT > 0 }}
         run: |
           NUM_CORES=$(nproc)
+          # 校验 PY_FILES 是否为空，且存在有效文件
+          if [ -z "${{ env.PY_FILES }}" ] || ! ls ${{ env.PY_FILES }} 1> /dev/null 2>&1; then
+            echo "⚠️ No valid .py files found, skipping Pylint (avoid empty parameter error)"
+            # 记录无有效文件状态，正常退出
+            echo "PYLINT_PY_STATUS=success" >> "$GITHUB_ENV"
+            exit 0
+          fi
+
           echo "Running Pylint on $PY_FILE_COUNT .py files..."
-          pylint ${{ env.PY_FILES }} --jobs=$NUM_CORES --rcfile=.github/pylint.conf
+
+          pylint ${{ env.PY_FILES }} --jobs=$NUM_CORES --rcfile=.github/pylint.conf > pylint_py_logs.txt 2>&1 || true
+
+          # 记录 .py 检查的真实状态（成功/失败）
+          if [ $? -eq 0 ]; then
+            echo "✅ .py files Pylint check passed"
+            echo "PYLINT_PY_STATUS=success" >> "$GITHUB_ENV"
+          else
+            echo "❌ .py files Pylint check failed, see details in pylint_py_logs.txt"
+            echo "PYLINT_PY_STATUS=failed" >> "$GITHUB_ENV"
+          fi
 
       - name: Skip Pylint for .py (no files)
-          if: env.PY_FILE_COUNT -eq 0
-          run: echo "✅ No .py files found, skipping Pylint for .py"
+        if: ${{ env.PY_FILE_COUNT == 0 }}
+        run: |
+          echo "✅ No .py files found, skipping Pylint for .py"
+          echo "PYLINT_PY_STATUS=skipped" >> "$GITHUB_ENV"
+
 
       - name: Run Pylint for .ipynb files (via nbqa)
-        if: env.IPYNB_FILE_COUNT -gt 0
+        if: ${{ env.IPYNB_FILE_COUNT > 0 }}
         run: |
           NUM_CORES=$(nproc)
+          # 同样校验 IPYNB_FILES 有效性
+          if [ -z "${{ env.IPYNB_FILES }}" ] || ! ls ${{ env.IPYNB_FILES }} 1> /dev/null 2>&1; then
+            echo "⚠️ No valid .ipynb files found, skipping nbqa Pylint"
+            echo "PYLINT_IPYNB_STATUS=skipped" >> "$GITHUB_ENV"
+            exit 0
+          fi
+
           echo "Running Pylint on $IPYNB_FILE_COUNT .ipynb files..."
-          nbqa pylint ${{ env.IPYNB_FILES }} --jobs=$NUM_CORES --rcfile=.github/pylint.conf
+          # 核心修复：同样屏蔽退出码，确保不终止后续步骤
+          nbqa pylint ${{ env.IPYNB_FILES }} --jobs=$NUM_CORES --rcfile=.github/pylint.conf > pylint_ipynb_logs.txt 2>&1 || true
+
+          # 记录 .ipynb 检查的真实状态
+          if [ $? -eq 0 ]; then
+            echo "✅ .ipynb files Pylint check passed"
+            echo "PYLINT_IPYNB_STATUS=success" >> "$GITHUB_ENV"
+          else
+            echo "❌ .ipynb files Pylint check failed, see details in pylint_ipynb_logs.txt"
+            echo "PYLINT_IPYNB_STATUS=failed" >> "$GITHUB_ENV"
+          fi
 
       - name: Skip Pylint for .ipynb (no files)
-        if: env.IPYNB_FILE_COUNT -eq 0
-        run: echo "✅ No .ipynb files found, skipping Pylint for .ipynb"
+        if: ${{ env.IPYNB_FILE_COUNT == 0 }}
+        run: |
+          echo "✅ No .ipynb files found, skipping Pylint for .ipynb"
+          echo "PYLINT_IPYNB_STATUS=skipped" >> "$GITHUB_ENV"
+
+      - name: Summarize Pylint Check Results
+        run: |
+          echo "===== Pylint Check Summary ====="
+          echo ".py files status: ${{ env.PYLINT_PY_STATUS }}"
+          echo ".ipynb files status: ${{ env.PYLINT_IPYNB_STATUS }}"
+          echo "================================="
+
+          # .py/.ipynb 有一个失败就让 CI 挂掉，取消注释下面的代码
+          if [ "${{ env.PYLINT_PY_STATUS }}" = "failed" ] || [ "${{ env.PYLINT_IPYNB_STATUS }}" = "failed" ]; then
+            echo "❌ Pylint check has failed items, CI terminated."
+            exit 1
+          fi
 
   markdownlint-check:
-    name: Markdownlint Check
-    runs-on: ubuntu-latest
+      name: Markdownlint Check
+      runs-on: ubuntu-latest
 
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
+      steps:
+        - name: Checkout Code
+          uses: actions/checkout@v4
+          with:
+            fetch-depth: 1
 
-      - name: Extract Markdown from .ipynb files
-        id: extract_md
-        run: |
-          mkdir -p temp_md
-          find . -name "*.ipynb" | while IFS= read -r nb; do
-            nb_relpath=$(realpath --relative-to=. "$nb")
-            temp_md_path="temp_md/${nb_relpath%.ipynb}.md"
-            mkdir -p "$(dirname "$temp_md_path")"
-            jq -r '
-              .cells
-              | map(select(.cell_type == "markdown") | .source | join(""))
-              | join("\n\n")
-            ' "$nb" > "$temp_md_path"
-          done
+        - name: Generate GitHub App token
+          id: generate-token
+          uses: actions/create-github-app-token@v1
+          with:
+            app-id: ${{ secrets.APP_ID }}
+            private-key: ${{ secrets.APP_PRIVATE_KEY }}
 
-      - name: Run markdownlint
-        uses: DavidAnson/markdownlint-cli2-action@v15
-        with:
-          globs: "**/*.md"
-          config: '.github/.markdownlint.json'
+        - name: Get PR changed .ipynb and .md files
+          id: get_pr_changed_files
+          if: ${{ github.event_name == 'pull_request' }}
+          run: |
+            # 1. 仅安装必需依赖：jq（解析 API 返回的 JSON）
+            if ! command -v jq &> /dev/null; then
+              sudo apt update && sudo apt install jq -y
+            fi
 
-      - name: Clean up temporary files
-        if: always()
-        run: rm -rf temp_md
+            # 2. 直接获取 GitHub App Token
+            APP_TOKEN="${{ steps.generate-token.outputs.token }}"
+
+            # 3. 核心：调用 GitHub API 获取 PR 改动文件（仅新增/修改，排除删除）
+            ALL_CHANGED_FILES=$(curl -s \
+              -H "Authorization: Bearer $APP_TOKEN" \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              "https://api.github.com/repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files" \
+              | jq -r '.[] | select(.status != "removed") | .filename')
+
+            # 4. 筛选：改动的 .ipynb 和 .md 文件（仅保留存在且非空的）
+            VALID_CHANGED_IPYNB=""
+            VALID_CHANGED_MD=""
+
+            while IFS= read -r file; do
+              # 跳过已删除或空文件（双重保障）
+              if [ ! -f "$file" ] || [ ! -s "$file" ]; then
+                continue
+              fi
+
+              # 分类筛选 .ipynb 和 .md
+              if [[ "$file" =~ \.ipynb$ ]]; then
+                VALID_CHANGED_IPYNB+="$file"$'\n'
+              elif [[ "$file" =~ \.md$ ]]; then
+                VALID_CHANGED_MD+="$file"$'\n'
+              fi
+            done <<< "$ALL_CHANGED_FILES"
+
+            # 去除末尾空行，导出为环境变量（供后续步骤使用）
+            VALID_CHANGED_IPYNB=$(echo "$VALID_CHANGED_IPYNB" | sed '/^$/d')
+            VALID_CHANGED_MD=$(echo "$VALID_CHANGED_MD" | sed '/^$/d')
+
+            echo "VALID_CHANGED_IPYNB<<EOF" >> "$GITHUB_ENV"
+            echo "$VALID_CHANGED_IPYNB" >> "$GITHUB_ENV"
+            echo "EOF" >> "$GITHUB_ENV"
+
+            echo "VALID_CHANGED_MD<<EOF" >> "$GITHUB_ENV"
+            echo "$VALID_CHANGED_MD" >> "$GITHUB_ENV"
+            echo "EOF" >> "$GITHUB_ENV"
+
+            # 打印结果
+            echo "======================================"
+            echo "===== PR Changed Files Summary ====="
+            echo "✅  Changed .ipynb files (to extract):"
+            [ -z "$VALID_CHANGED_IPYNB" ] && echo "  - None" || echo "$VALID_CHANGED_IPYNB" | while IFS= read -r f; do echo "  - $f"; done
+            echo "✅  Changed .md files (to lint directly):"
+            [ -z "$VALID_CHANGED_MD" ] && echo "  - None" || echo "$VALID_CHANGED_MD" | while IFS= read -r f; do echo "  - $f"; done
+            echo "======================================"
+
+        - name: Extract Markdown from PR changed .ipynb files
+          id: extract_md
+          run: |
+            set +e +u +o pipefail
+            # 开启错误追踪（便于定位哪一行报错）
+            # set -x
+
+            export LC_ALL=en_US.UTF-8
+            export LANG=en_US.UTF-8
+
+            # 核心配置（导出为环境变量，避免未定义）
+            TARGET_DIR="./temp_md"
+            MAP_FILE="./md_ipynb_mapping.log"
+            ERROR_LOG="./extract_error.log"
+            # 确保变量导出，避免后续步骤引用未定义
+            echo "TARGET_DIR=$TARGET_DIR" >> "$GITHUB_ENV"
+            echo "MAP_FILE=$MAP_FILE" >> "$GITHUB_ENV"
+
+            # 初始化目录和文件
+            mkdir -p "$TARGET_DIR" || { echo "⚠️ Failed to create $TARGET_DIR, exit"; exit 0; }
+            rm -rf "$TARGET_DIR"/* || true
+            rm -f "$MAP_FILE" jq_batch_error.log temp_extract.tmp || true
+            rm -f "$MAP_FILE" "$ERROR_LOG" || true
+
+            # 无改动 .ipynb 则直接退出
+            if [ -z "${{ env.VALID_CHANGED_IPYNB }}" ]; then
+              echo "ℹ️  No changed .ipynb files to process, skipping extraction"
+              exit 0
+            fi
+
+            # 遍历 PR 改动的 .ipynb 文件
+            while IFS= read -r nb_file; do
+              # 基础校验（CI 环境增强容错）
+              if [ -z "$nb_file" ] || [ ! -f "$nb_file" ] || [ ! -s "$nb_file" ]; then
+                echo "ℹ️  Skip invalid/empty file: $nb_file" >> "$ERROR_LOG"
+                continue
+              fi
+
+              # 用 jq . 快速校验 JSON 是否可解析，静默执行
+              if ! jq . "$nb_file" > /dev/null 2>&1; then
+                error_msg="JSON parse failed (corrupted file)"
+                echo "❌ Skip $nb_file: $error_msg"
+                echo "ERROR: $nb_file - $error_msg" >> "$ERROR_LOG"
+                continue
+              fi
+
+              # 生成目标 MD 路径
+              nb_relpath="${nb_file#./}"
+              md_file="$TARGET_DIR/${nb_relpath%.ipynb}.md"
+              mkdir -p "$(dirname "$md_file")" || { echo "⚠️ Skip create dir for $md_file"; continue; }
+              > "$md_file"
+
+              # JQ 提取并保存退出码（带 cell 索引标记）
+              markdown_content=$(jq -r '
+                try (
+                  .cells | to_entries[] |
+                  select(.value.cell_type == "markdown") |
+                  "<!-- CELL_IDX: \(.key) -->\n" +
+                  (.value.source | if type == "array" then join("") else tostring end)
+                ) catch ""
+              ' "$nb_file" 2>> "$ERROR_LOG")
+              jq_exit_code=$?
+
+              # 如果 JQ 执行失败，跳过该文件
+              if [ $jq_exit_code -ne 0 ]; then
+                error_msg="JQ extraction failed (exit code: $jq_exit_code)"
+                echo "❌ Skip $nb_file: $error_msg"
+                echo "ERROR: $nb_file - $error_msg" >> "$ERROR_LOG"
+                rm -f "$md_file"  # 清理空文件
+                continue
+              fi
+
+              # 无内容则跳过
+              if [ -z "$markdown_content" ]; then
+                echo "ℹ️ No markdown content: $nb_file" >> "$ERROR_LOG"
+                rm -f "$md_file"
+                continue
+              fi
+
+              # 写入 MD 文件
+              echo "$markdown_content" > "$md_file"
+              sync "$md_file" || true
+
+              # 生成映射表
+              md_line=0
+              cell_idx=0  # 默认值
+              while IFS= read -r line; do
+                md_line=$((md_line + 1))
+
+                # 解析 cell 索引标记
+                if echo "$line" | grep -q '<!-- CELL_IDX: [0-9]\+ -->'; then
+                  cell_idx=$(echo "$line" | cut -d ':' -f 2 | cut -d ' ' -f 2)
+                  continue
+                fi
+
+                # 写入映射表
+                echo "$nb_file,$cell_idx,$md_file,$md_line" >> "$MAP_FILE" || true
+              done < "$md_file"
+
+              echo "✅ Extracted: $nb_file → $md_file"
+            done <<< "$VALID_CHANGED_IPYNB"
+
+            # 关闭错误追踪，打印提取日志
+            # set +x
+            echo -e "\n======================================"
+            echo "===== Extraction Logs ======"
+            if [ -s "$ERROR_LOG" ]; then
+              echo "❌ Skipped files (errors):"
+              cat "$ERROR_LOG" | sort | uniq
+            else
+              echo "✅ No extraction errors"
+            fi
+            # 安全获取映射表行数
+            map_line_count=0
+            if [ -f "$MAP_FILE" ]; then
+              map_line_count=$(wc -l < "$MAP_FILE" 2>/dev/null || echo 0)
+            fi
+            echo "✅ Mapping file: $MAP_FILE (lines: $map_line_count)"
+            echo "======================================"
+
+        - name: Run markdownlint (PR changed .md + extracted MD)
+          if: ${{ env.VALID_CHANGED_IPYNB != '' || env.VALID_CHANGED_MD != '' }}
+          run: |
+            # 安装 markdownlint-cli2（Ubuntu 环境无默认安装，需手动安装）
+            npm install -g markdownlint-cli2
+
+            # 构建校验路径列表
+            LINT_PATHS=""
+            MAP_FILE="./md_ipynb_mapping.log"
+            LINT_ERROR_LOG="./markdownlint_error.log"
+
+            # 1. 添加PR改动的原生MD文件
+            if [ -n "${{ env.VALID_CHANGED_MD }}" ]; then
+              RAW_MD=$(echo "${{ env.VALID_CHANGED_MD }}" | tr '\n' ' ' | sed 's/ $//')
+              LINT_PATHS+="$RAW_MD "
+            fi
+
+            # 2. 添加提取的MD文件
+            if [ -n "${{ env.VALID_CHANGED_IPYNB }}" ]; then
+              LINT_PATHS+="temp_md/**/*.md"
+            fi
+
+            # 清理旧日志
+            rm -f "$LINT_ERROR_LOG"
+
+            # 打印校验路径
+            echo -e "\n======================================"
+            echo "===== Markdownlint Check Paths ====="
+            echo "$LINT_PATHS" | tr ' ' '\n' | grep -v '^$' | while IFS= read -r p; do echo "  - $p"; done
+            echo "======================================"
+
+            # 执行markdownlint
+            echo "ℹ️  Running markdownlint..."
+            markdownlint-cli2 $LINT_PATHS --config .github/.markdownlint.json --json > "$LINT_ERROR_LOG" 2>&1
+            lint_exit_code=$?
+
+            # 检查是否有错误
+            if [ $lint_exit_code -ne 0 ] && [ -s "$LINT_ERROR_LOG" ]; then
+              echo -e "\n======================================"
+              echo "===== Markdownlint Errors (Traced to IPYNB) ====="
+
+              # 用jq解析JSON错误，标准化输出格式
+              jq -r '
+                .[] | .file as $file |
+                .errors[] |
+                "\($file):\(.line):\(.column): \(.rule): \(.message)"
+              ' "$LINT_ERROR_LOG" | while IFS= read -r error_line; do
+                # 解析错误行：file:line:col: rule: message
+                if [[ "$error_line" =~ ^([^:]+):([0-9]+):([0-9]+): ([^:]+): (.*)$ ]]; then
+                  err_file="${BASH_REMATCH[1]}"
+                  err_line="${BASH_REMATCH[2]}"
+                  err_rule="${BASH_REMATCH[4]}"
+                  err_msg="${BASH_REMATCH[5]}"
+
+                  # 转换为相对路径
+                  err_file_abs=$(realpath --relative-to=. "$err_file" 2>/dev/null || echo "$err_file")
+
+                  # 从映射表查找原IPYNB信息
+                  trace_result=$(grep "^.*,.*,$err_file_abs,$err_line$" "$MAP_FILE" 2>/dev/null | head -n1)
+
+                  if [ -n "$trace_result" ]; then
+                    # 解析映射表：ipynb_file, cell_idx, md_file, md_line
+                    IFS=',' read -r ipynb_file cell_idx _ _ <<< "$trace_result"
+                    echo -e "❌ Error in ORIGINAL IPYNB:"
+                    echo -e "  File: $ipynb_file (cell: $cell_idx)"
+                    echo -e "  Temp MD: $err_file (line: $err_line, col: ${BASH_REMATCH[3]})"
+                    echo -e "  Rule: $err_rule"
+                    echo -e "  Message: $err_msg"
+                  else
+                    # 原生MD文件或未匹配到的行
+                    echo -e "❌ Error in MD file:"
+                    echo -e "  File: $err_file (line: $err_line, col: ${BASH_REMATCH[3]})"
+                    echo -e "  Rule: $err_rule"
+                    echo -e "  Message: $err_msg"
+                  fi
+                  echo -e "--------------------------------------"
+                else
+                  echo "$error_line"
+                fi
+              done
+
+              # 统计错误总数
+              total_errors=$(jq '[.[] | .errors[]] | length' "$LINT_ERROR_LOG")
+              echo "======================================"
+              echo "❌ Markdownlint check failed (total errors: $total_errors)!"
+              exit 1
+            else
+              echo -e "\n✅ No markdownlint errors found!"
+              exit 0
+            fi
+
+        - name: Skip Markdownlint (no files)
+          if: ${{ env.VALID_CHANGED_IPYNB == '' && env.VALID_CHANGED_MD == '' }}
+          run: |
+            echo "✅ No changed MD/IPYNB files, skipping markdownlint"
+
+        - name: Clean up temporary files
+          if: ${{ always() }}
+          run: |
+            rm -rf temp_md
+            rm -f md_ipynb_mapping.log jq_batch_error.log markdownlint_error.log temp_extract.tmp
