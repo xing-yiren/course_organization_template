@@ -21,6 +21,8 @@ jobs:
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -34,65 +36,101 @@ jobs:
           pip install torch --index-url https://download.pytorch.org/whl/cpu
           if [ -f "requirements.txt" ]; then pip install -r requirements.txt; fi
 
-      - name: Get target directories
-        id: get_files
+      - name: Get Modified .py/.ipynb Files (Align with Markdownlint Logic)
+        id: get_modified_files
         run: |
-          # Find .py files - 新增：过滤空行、仅保留真实存在的文件
-          PY_FILES=$(find . -type f -name "*.py" ! -path "./.git/*" ! -path "./.github/*" | grep -v '^$')
-          # 修复：真实统计有效 .py 文件数量（避免空行导致假计数）
-          PY_FILE_COUNT=$(echo "$PY_FILES" | wc -l | tr -d ' ')
-          # 兜底：若 PY_FILE_COUNT 为空或非数字，强制设为 0
-          if ! [[ "$PY_FILE_COUNT" =~ ^[0-9]+$ ]]; then
-            PY_FILE_COUNT=0
+          set -euo pipefail
+
+          # 1. 初始化变量（对齐markdownlint的VALID_CHANGED_XXX命名）
+          VALID_CHANGED_PY=""
+          VALID_CHANGED_IPYNB=""
+          ALL_CHANGED_FILES=""
+
+          # 2. 区分PR/Push场景（参考markdownlint的API+git diff双逻辑）
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            # PR场景：优先用GitHub API
+            echo "🔍 PR Mode: Get changed files via GitHub API"
+            # 安装jq（和markdownlint逻辑对齐）
+            if ! command -v jq &> /dev/null; then
+              sudo apt update && sudo apt install jq -y
+            fi
+            # 调用API获取PR改动文件（排除删除的）
+            ALL_CHANGED_FILES=$(curl -s \
+              -H "Authorization: token ${{ github.token }}" \  # 用默认token即可，无需App Token
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              "https://api.github.com/repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files" \
+              | jq -r '.[] | select(.status != "removed") | .filename')
+          else
+            # Push场景：用git diff
+            echo "🔍 Push Mode: Get changed files via git diff"
+            if git rev-parse --verify HEAD^ >/dev/null 2>&1; then
+              ALL_CHANGED_FILES=$(git diff --name-only HEAD^ HEAD --diff-filter=ACMRT)
+            else
+              ALL_CHANGED_FILES=$(git ls-files)  # 首次提交兜底
+            fi
           fi
 
-          # Find .ipynb files - 同样优化（保持一致性）
-          IPYNB_FILES=$(find . -type f -name "*.ipynb" ! -path "./.git/*" ! -path "./.github/*" | grep -v '^$')
-          IPYNB_FILE_COUNT=$(echo "$IPYNB_FILES" | wc -l | tr -d ' ')
-          if ! [[ "$IPYNB_FILE_COUNT" =~ ^[0-9]+$ ]]; then
-            IPYNB_FILE_COUNT=0
-          fi
+          # 3. 筛选改动的.py/.ipynb文件
+          while IFS= read -r file; do
+            # 跳过空行、已删除、空文件
+            if [ -z "$file" ] || [ ! -f "$file" ] || [ ! -s "$file" ]; then
+              continue
+            fi
+            # 分类筛选
+            if [[ "$file" =~ \.py$ ]]; then
+              VALID_CHANGED_PY+="$file"$'\n'
+            elif [[ "$file" =~ \.ipynb$ ]]; then
+              VALID_CHANGED_IPYNB+="$file"$'\n'
+            fi
+          done <<< "$ALL_CHANGED_FILES"
 
-          # 修复：仅当存在有效 .py 文件时，才生成文件路径字符串（避免空字符串）
-          PY_FILES_STR=""
-          if [ "$PY_FILE_COUNT" -gt 0 ]; then
-            PY_FILES_STR=$(echo "$PY_FILES" | tr '\n' ' ' | sed 's/ $//')
-          fi
-          # 同理优化 .ipynb 文件路径字符串
-          IPYNB_FILES_STR=""
-          if [ "$IPYNB_FILE_COUNT" -gt 0 ]; then
-            IPYNB_FILES_STR=$(echo "$IPYNB_FILES" | tr '\n' ' ' | sed 's/ $//')
-          fi
+          # 4. 去除末尾空行
+          VALID_CHANGED_PY=$(echo "$VALID_CHANGED_PY" | sed '/^$/d')
+          VALID_CHANGED_IPYNB=$(echo "$VALID_CHANGED_IPYNB" | sed '/^$/d')
+
+          # 5. 导出环境变量
+          # 生成带空格的路径字符串（用于pylint命令）
+          PY_FILES_STR=$(echo "$VALID_CHANGED_PY" | tr '\n' ' ' | sed 's/ $//')
+          IPYNB_FILES_STR=$(echo "$VALID_CHANGED_IPYNB" | tr '\n' ' ' | sed 's/ $//')
+          # 统计文件数量
+          PY_FILE_COUNT=$(echo "$VALID_CHANGED_PY" | wc -l | tr -d ' ')
+          IPYNB_FILE_COUNT=$(echo "$VALID_CHANGED_IPYNB" | wc -l | tr -d ' ')
+          # 兜底：空值设为0
+          if ! [[ "$PY_FILE_COUNT" =~ ^[0-9]+$ ]]; then PY_FILE_COUNT=0; fi
+          if ! [[ "$IPYNB_FILE_COUNT" =~ ^[0-9]+$ ]]; then IPYNB_FILE_COUNT=0; fi
+
+          # 写入环境变量
+          echo "VALID_CHANGED_PY<<EOF" >> "$GITHUB_ENV"
+          echo "$VALID_CHANGED_PY" >> "$GITHUB_ENV"
+          echo "EOF" >> "$GITHUB_ENV"
+
+          echo "VALID_CHANGED_IPYNB<<EOF" >> "$GITHUB_ENV"
+          echo "$VALID_CHANGED_IPYNB" >> "$GITHUB_ENV"
+          echo "EOF" >> "$GITHUB_ENV"
 
           echo "PY_FILES=$PY_FILES_STR" >> "$GITHUB_ENV"
           echo "PY_FILE_COUNT=$PY_FILE_COUNT" >> "$GITHUB_ENV"
           echo "IPYNB_FILES=$IPYNB_FILES_STR" >> "$GITHUB_ENV"
           echo "IPYNB_FILE_COUNT=$IPYNB_FILE_COUNT" >> "$GITHUB_ENV"
 
-          echo "===== File Scan Result ====="
-          echo ".py files found: $PY_FILE_COUNT"
-          [ "$PY_FILE_COUNT" -gt 0 ] && echo "List: $PY_FILES_STR" || echo "List: None"
-          echo ".ipynb files found: $IPYNB_FILE_COUNT"
-          [ "$IPYNB_FILE_COUNT" -gt 0 ] && echo "List: $IPYNB_FILES_STR" || echo "List: None"
-          echo "============================"
+          # 6. 打印结果（和markdownlint的输出格式对齐）
+          echo "======================================"
+          echo "===== Changed Files Summary ====="
+          echo "✅  Changed .py files (to lint):"
+          [ -z "$VALID_CHANGED_PY" ] && echo "  - None" || echo "$VALID_CHANGED_PY" | while IFS= read -r f; do echo "  - $f"; done
+          echo "✅  Changed .ipynb files (to lint):"
+          [ -z "$VALID_CHANGED_IPYNB" ] && echo "  - None" || echo "$VALID_CHANGED_IPYNB" | while IFS= read -r f; do echo "  - $f"; done
+          echo "======================================"
+        shell: bash
 
       - name: Run Pylint for .py files
         if: ${{ env.PY_FILE_COUNT > 0 }}
         run: |
           NUM_CORES=$(nproc)
-          # 校验 PY_FILES 是否为空，且存在有效文件
-          if [ -z "${{ env.PY_FILES }}" ] || ! ls ${{ env.PY_FILES }} 1> /dev/null 2>&1; then
-            echo "⚠️ No valid .py files found, skipping Pylint (avoid empty parameter error)"
-            # 记录无有效文件状态，正常退出
-            echo "PYLINT_PY_STATUS=success" >> "$GITHUB_ENV"
-            exit 0
-          fi
-
-          echo "Running Pylint on $PY_FILE_COUNT .py files..."
-
+          echo "🔧 Running Pylint on modified .py files..."
           pylint ${{ env.PY_FILES }} --jobs=$NUM_CORES --rcfile=.github/pylint.conf > pylint_py_logs.txt 2>&1 || true
 
-          # 记录 .py 检查的真实状态（成功/失败）
           if [ $? -eq 0 ]; then
             echo "✅ .py files Pylint check passed"
             echo "PYLINT_PY_STATUS=success" >> "$GITHUB_ENV"
@@ -100,11 +138,12 @@ jobs:
             echo "❌ .py files Pylint check failed, see details in pylint_py_logs.txt"
             echo "PYLINT_PY_STATUS=failed" >> "$GITHUB_ENV"
           fi
+        shell: bash
 
       - name: Skip Pylint for .py (no files)
         if: ${{ env.PY_FILE_COUNT == 0 }}
         run: |
-          echo "✅ No .py files found, skipping Pylint for .py"
+          echo "✅ No modified .py files found, skipping Pylint for .py"
           echo "PYLINT_PY_STATUS=skipped" >> "$GITHUB_ENV"
 
 
@@ -112,18 +151,9 @@ jobs:
         if: ${{ env.IPYNB_FILE_COUNT > 0 }}
         run: |
           NUM_CORES=$(nproc)
-          # 同样校验 IPYNB_FILES 有效性
-          if [ -z "${{ env.IPYNB_FILES }}" ] || ! ls ${{ env.IPYNB_FILES }} 1> /dev/null 2>&1; then
-            echo "⚠️ No valid .ipynb files found, skipping nbqa Pylint"
-            echo "PYLINT_IPYNB_STATUS=skipped" >> "$GITHUB_ENV"
-            exit 0
-          fi
-
-          echo "Running Pylint on $IPYNB_FILE_COUNT .ipynb files..."
-          # 核心修复：同样屏蔽退出码，确保不终止后续步骤
+          echo "🔧 Running Pylint on modified .ipynb files..."
           nbqa pylint ${{ env.IPYNB_FILES }} --jobs=$NUM_CORES --rcfile=.github/pylint.conf > pylint_ipynb_logs.txt 2>&1 || true
 
-          # 记录 .ipynb 检查的真实状态
           if [ $? -eq 0 ]; then
             echo "✅ .ipynb files Pylint check passed"
             echo "PYLINT_IPYNB_STATUS=success" >> "$GITHUB_ENV"
@@ -131,11 +161,12 @@ jobs:
             echo "❌ .ipynb files Pylint check failed, see details in pylint_ipynb_logs.txt"
             echo "PYLINT_IPYNB_STATUS=failed" >> "$GITHUB_ENV"
           fi
+        shell: bash
 
       - name: Skip Pylint for .ipynb (no files)
         if: ${{ env.IPYNB_FILE_COUNT == 0 }}
         run: |
-          echo "✅ No .ipynb files found, skipping Pylint for .ipynb"
+          echo "✅ No modified .ipynb files found, skipping Pylint for .ipynb"
           echo "PYLINT_IPYNB_STATUS=skipped" >> "$GITHUB_ENV"
 
       - name: Summarize Pylint Check Results
@@ -145,11 +176,11 @@ jobs:
           echo ".ipynb files status: ${{ env.PYLINT_IPYNB_STATUS }}"
           echo "================================="
 
-          # .py/.ipynb 有一个失败就让 CI 挂掉，取消注释下面的代码
           if [ "${{ env.PYLINT_PY_STATUS }}" = "failed" ] || [ "${{ env.PYLINT_IPYNB_STATUS }}" = "failed" ]; then
             echo "❌ Pylint check has failed items, CI terminated."
             exit 1
           fi
+        shell: bash
 
   markdownlint-check:
       name: Markdownlint Check
