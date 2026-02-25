@@ -24,4 +24,16 @@ print(outputs)
 
 outputs = generator([chat1, chat2], do_sample=False, max_new_tokens=10)
 print(outputs)
- print(outputs)
+def hello():
+ print("Hello")  # ✅ 1个空格
+  print("World") # ❌ 2个空格（同一层级不一致）
+
+# 违反：驼峰命名（首字母小写）
+userName = "John"              # 应该是 user_name
+firstName = "John"             # 应该是 first_name
+getUserInfo = get_user_info()  # 应该是 get_user_info
+totalCount = 100               # 应该是 total_count
+
+# 违反：驼峰命名（首字母大写）- 通常用于类名
+UserName = "John"              # 变量名不能用类名风格
+FirstName = "John"             # 应该是 first_name
