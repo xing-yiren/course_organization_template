@@ -140,9 +140,13 @@ jobs:
         run: |
           NUM_CORES=$(nproc)
           echo "🔧 Running Pylint on modified .py files..."
-          pylint ${{ env.PY_FILES }} --jobs=$NUM_CORES --rcfile=.github/pylint.conf > pylint_py_logs.txt 2>&1 || true
+          pylint ${{ env.PY_FILES }} --jobs=$NUM_CORES --rcfile=.github/pylint.conf 2>&1 | tee pylint_py_logs.txt
 
-          if [ $? -eq 0 ]; then
+          # 捕获 Pylint 的真实退出码（PIPESTATUS[0] 获取管道第一个命令的退出码）
+          PYLINT_EXIT_CODE=${PIPESTATUS[0]}
+
+          # 根据真实退出码判断结果
+          if [ $PYLINT_EXIT_CODE -eq 0 ]; then
             echo "✅ .py files Pylint check passed"
             echo "PYLINT_PY_STATUS=success" >> "$GITHUB_ENV"
           else
