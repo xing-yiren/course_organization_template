@@ -151,13 +151,22 @@ jobs:
           # 根据真实退出码判断结果
           if [ $PYLINT_EXIT_CODE -eq 0 ]; then
             echo "✅ .py files Pylint check passed"
-            echo "PYLINT_PY_STATUS=success" >> "$GITHUB_ENV"
           else
             echo "❌ .py files Pylint check failed, see details in pylint_py_logs.txt"
-            echo "PYLINT_PY_STATUS=failed" >> "$GITHUB_ENV"
           fi
         shell: bash
         continue-on-error: true  # 允许这一步失败但不影响后续步骤
+
+      - name: Set Pylint .py Status
+        if: ${{ env.PY_FILE_COUNT > 0 }}
+        run: |
+          if [ -f pylint_py_exit_code.txt ] && [ "$(cat pylint_py_exit_code.txt)" = "0" ]; then
+            echo "PYLINT_PY_STATUS=success" >> "$GITHUB_ENV"
+          else
+            echo "PYLINT_PY_STATUS=failed" >> "$GITHUB_ENV"
+          fi
+        shell: bash
+
 
       - name: Skip Pylint for .py (no files)
         if: ${{ env.PY_FILE_COUNT == 0 }}
@@ -181,13 +190,21 @@ jobs:
 
           if [ $NBQA_EXIT_CODE -eq 0 ]; then
             echo "✅ .ipynb files Pylint check passed"
-            echo "PYLINT_IPYNB_STATUS=success" >> "$GITHUB_ENV"
           else
             echo "❌ .ipynb files Pylint check failed, see details in pylint_ipynb_logs.txt"
-            echo "PYLINT_IPYNB_STATUS=failed" >> "$GITHUB_ENV"
           fi
         shell: bash
         continue-on-error: true  # 允许这一步失败但不影响后续步骤
+
+      - name: Set Pylint .ipynb Status
+        if: ${{ env.IPYNB_FILE_COUNT > 0 }}
+        run: |
+          if [ -f pylint_ipynb_exit_code.txt ] && [ "$(cat pylint_ipynb_exit_code.txt)" = "0" ]; then
+            echo "PYLINT_IPYNB_STATUS=success" >> "$GITHUB_ENV"
+          else
+            echo "PYLINT_IPYNB_STATUS=failed" >> "$GITHUB_ENV"
+          fi
+        shell: bash
 
       - name: Skip Pylint for .ipynb (no files)
         if: ${{ env.IPYNB_FILE_COUNT == 0 }}
