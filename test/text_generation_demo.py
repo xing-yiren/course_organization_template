@@ -26,7 +26,7 @@ outputs = generator([chat1, chat2], do_sample=False, max_new_tokens=10)
 print(outputs)
 def hello():
  print("Hello")  # ✅ 1个空格
-  print("World") # ❌ 2个空格（同一层级不一致）
+ print("World") # ❌ 2个空格（同一层级不一致）
 
 # 违反：驼峰命名（首字母小写）
 userName = "John"              # 应该是 user_name
