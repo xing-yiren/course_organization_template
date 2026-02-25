@@ -55,12 +55,23 @@ jobs:
               sudo apt update && sudo apt install jq -y
             fi
             # 调用API获取PR改动文件（排除删除的）
-            ALL_CHANGED_FILES=$(curl -s \
-              -H "Authorization: token ${{ github.token }}" \  # 用默认token即可，无需App Token
-              -H "Accept: application/vnd.github+json" \
-              -H "X-GitHub-Api-Version: 2022-11-28" \
-              "https://api.github.com/repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files" \
-              | jq -r '.[] | select(.status != "removed") | .filename')
+            # ALL_CHANGED_FILES=$(curl -s \
+            #   -H "Authorization: token ${{ github.token }}" \  # 用默认token即可，无需App Token
+            #   -H "Accept: application/vnd.github+json" \
+            #   -H "X-GitHub-Api-Version: 2022-11-28" \
+            #   "https://api.github.com/repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files" \
+            #   | jq -r '.[] | select(.status != "removed") | .filename')
+            # 定义curl参数数组
+            CURL_ARGS=(
+              -s
+              -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}"
+              -H "Accept: application/vnd.github+json"
+              -H "X-GitHub-Api-Version: 2022-11-28"
+              "https://api.github.com/repos/xing-yiren/course_organization_template/pulls/23/files"
+            )
+            
+            # 执行curl
+            ALL_CHANGED_FILES=$(curl "${CURL_ARGS[@]}" | jq -r '.[] | select(.status != "removed") | .filename')
           else
             # Push场景：用git diff
             echo "🔍 Push Mode: Get changed files via git diff"
