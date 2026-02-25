@@ -55,12 +55,23 @@ jobs:
               sudo apt update && sudo apt install jq -y
             fi
             # 调用API获取PR改动文件（排除删除的）
-            ALL_CHANGED_FILES=$(curl -s \
-              -H "Authorization: token ${{ github.token }}" \  # 用默认token即可，无需App Token
-              -H "Accept: application/vnd.github+json" \
-              -H "X-GitHub-Api-Version: 2022-11-28" \
-              "https://api.github.com/repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files" \
-              | jq -r '.[] | select(.status != "removed") | .filename')
+            # ALL_CHANGED_FILES=$(curl -s \
+            #   -H "Authorization: token ${{ github.token }}" \  # 用默认token即可，无需App Token
+            #   -H "Accept: application/vnd.github+json" \
+            #   -H "X-GitHub-Api-Version: 2022-11-28" \
+            #   "https://api.github.com/repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files" \
+            #   | jq -r '.[] | select(.status != "removed") | .filename')
+            # 定义curl参数数组
+            CURL_ARGS=(
+              -s
+              -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}"
+              -H "Accept: application/vnd.github+json"
+              -H "X-GitHub-Api-Version: 2022-11-28"
+              "https://api.github.com/repos/xing-yiren/course_organization_template/pulls/23/files"
+            )
+            
+            # 执行curl
+            ALL_CHANGED_FILES=$(curl "${CURL_ARGS[@]}" | jq -r '.[] | select(.status != "removed") | .filename')
           else
             # Push场景：用git diff
             echo "🔍 Push Mode: Get changed files via git diff"
@@ -129,9 +140,13 @@ jobs:
         run: |
           NUM_CORES=$(nproc)
           echo "🔧 Running Pylint on modified .py files..."
-          pylint ${{ env.PY_FILES }} --jobs=$NUM_CORES --rcfile=.github/pylint.conf > pylint_py_logs.txt 2>&1 || true
+          pylint ${{ env.PY_FILES }} --jobs=$NUM_CORES --rcfile=.github/pylint.conf 2>&1 | tee pylint_py_logs.txt
 
-          if [ $? -eq 0 ]; then
+          # 捕获 Pylint 的真实退出码（PIPESTATUS[0] 获取管道第一个命令的退出码）
+          PYLINT_EXIT_CODE=${PIPESTATUS[0]}
+
+          # 根据真实退出码判断结果
+          if [ $PYLINT_EXIT_CODE -eq 0 ]; then
             echo "✅ .py files Pylint check passed"
             echo "PYLINT_PY_STATUS=success" >> "$GITHUB_ENV"
           else
@@ -196,8 +211,10 @@ jobs:
           id: generate-token
           uses: actions/create-github-app-token@v1
           with:
-            app-id: ${{ secrets.APP_ID }}
-            private-key: ${{ secrets.APP_PRIVATE_KEY }}
+            # app-id: ${{ secrets.APP_ID }}
+            # private-key: ${{ secrets.APP_PRIVATE_KEY }}
+            app-id: ${{ secrets.PR_APPROVER_APP_ID }}
+            private-key: ${{ secrets.PR_APPROVER_PRIVATE_KEY }}
 
         - name: Get PR changed .ipynb and .md files
           id: get_pr_changed_files
@@ -212,12 +229,24 @@ jobs:
             APP_TOKEN="${{ steps.generate-token.outputs.token }}"
 
             # 3. 核心：调用 GitHub API 获取 PR 改动文件（仅新增/修改，排除删除）
-            ALL_CHANGED_FILES=$(curl -s \
-              -H "Authorization: Bearer $APP_TOKEN" \
-              -H "Accept: application/vnd.github+json" \
-              -H "X-GitHub-Api-Version: 2022-11-28" \
-              "https://api.github.com/repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files" \
-              | jq -r '.[] | select(.status != "removed") | .filename')
+            # ALL_CHANGED_FILES=$(curl -s \
+            #   -H "Authorization: Bearer $APP_TOKEN" \
+            #   -H "Accept: application/vnd.github+json" \
+            #   -H "X-GitHub-Api-Version: 2022-11-28" \
+            #   "https://api.github.com/repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files" \
+            #   | jq -r '.[] | select(.status != "removed") | .filename')
+
+            # 定义curl参数数组
+            CURL_ARGS=(
+              -s
+              -H "Authorization: Bearer $APP_TOKEN"
+              -H "Accept: application/vnd.github+json"
+              -H "X-GitHub-Api-Version: 2022-11-28"
+              "https://api.github.com/repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files"
+            )
+            
+            # 执行curl
+            ALL_CHANGED_FILES=$(curl "${CURL_ARGS[@]}" | jq -r '.[] | select(.status != "removed") | .filename')
 
             # 4. 筛选：改动的 .ipynb 和 .md 文件（仅保留存在且非空的）
             VALID_CHANGED_IPYNB=""

@@ -24,7 +24,10 @@ print(outputs)
 
 outputs = generator([chat1, chat2], do_sample=False, max_new_tokens=10)
 print(outputs)
+<<<<<<< HEAD
 
+=======
+>>>>>>> d17ae193f9b210255c1cef567810d071c7096b57
 def hello():
  print("Hello")  # ✅ 1个空格
  print("World") # ❌ 2个空格（同一层级不一致）
