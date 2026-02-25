@@ -24,3 +24,4 @@ print(outputs)
 
 outputs = generator([chat1, chat2], do_sample=False, max_new_tokens=10)
 print(outputs)
+ print(outputs)
