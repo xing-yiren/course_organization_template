@@ -259,6 +259,30 @@ jobs:
           with:
             fetch-depth: 1
 
+        - name: Validate GitHub App Secrets
+          run: |
+            # 检查 secrets 是否为空
+            if [ -z "${{ secrets.APP_ID }}" ]; then
+              echo "::error::APP_ID secret is empty or not available"
+              exit 1
+            fi
+            
+            if [ -z "${{ secrets.APP_PRIVATE_KEY }}" ]; then
+              echo "::error::APP_PRIVATE_KEY secret is empty or not available"
+              exit 1
+            fi
+            
+            # 检查私钥格式
+            if [[ ! "${{ secrets.APP_PRIVATE_KEY }}" =~ ^-----BEGIN ]]; then
+              echo "::warning::APP_PRIVATE_KEY may have incorrect format (should start with -----BEGIN)"
+            fi
+            
+            echo "✅ GitHub App secrets validation passed"
+            
+            # 打印长度信息（安全）
+            echo "APP_ID length: $(echo -n "${{ secrets.APP_ID }}" | wc -c) chars"
+            echo "Private key length: $(echo -n "${{ secrets.APP_PRIVATE_KEY }}" | wc -c) chars"
+
         - name: Generate GitHub App token
           id: generate-token
           uses: actions/create-github-app-token@v1
