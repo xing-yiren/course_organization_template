@@ -263,10 +263,10 @@ jobs:
           id: generate-token
           uses: actions/create-github-app-token@v1
           with:
-            # app-id: ${{ secrets.APP_ID }}
-            # private-key: ${{ secrets.APP_PRIVATE_KEY }}
-            app-id: ${{ secrets.PR_APPROVER_APP_ID }}
-            private-key: ${{ secrets.PR_APPROVER_PRIVATE_KEY }}
+            app-id: ${{ secrets.APP_ID }}
+            private-key: ${{ secrets.APP_PRIVATE_KEY }}
+            # app-id: ${{ secrets.PR_APPROVER_APP_ID }}
+            # private-key: ${{ secrets.PR_APPROVER_PRIVATE_KEY }}
 
         - name: Get PR changed .ipynb and .md files
           id: get_pr_changed_files
