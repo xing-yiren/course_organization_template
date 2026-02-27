@@ -20,9 +20,9 @@ jobs:
   pylint-check:
     name: Pylint Check
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      pull-requests: write  # Required for assign reviewers and comments
+    # permissions:
+    #   contents: read
+    #   pull-requests: write  # Required for assign reviewers and comments
 
     steps:
       - name: Checkout Code
