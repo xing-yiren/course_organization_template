@@ -52,6 +52,15 @@ jobs:
           else
             echo "✅ Pylint is already installed: $(pylint --version | head -n 1)"
           fi
+
+          # 检查并安装 nbqa（用于 Jupyter Notebook 检查）
+          if ! command -v nbqa &> /dev/null; then
+            echo "📦 nbQA not found, installing..."
+            pip install nbqa
+            echo "✅ nbQA installation completed: $(nbqa --version 2>/dev/null || echo 'installed')"
+          else
+            echo "✅ nbQA is already installed"
+          fi
         shell: bash
   
       - name: Get Modified .py/.ipynb Files (Align with Markdownlint Logic)
