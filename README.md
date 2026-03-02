@@ -1,93 +1,62 @@
 <div align=center>
-  <h1>Applications</h1>
-  <p><a href="./README_ZH.md">查看中文</a></p>
+  <h1>昇思+昇腾开发板学习资源库</h1>
+  <p><a href="./README.md">View English</a></p>
 </div>
 
-This repository provides a curated collection of AI application examples built with **MindSpore**, covering domains such as CV, NLP, GANs, Diffusion Models, LLMs, RAG, and Agents. Each case is organized by **domain** and **model**, offering reusable implementations for representative tasks. It serves as a practical reference for developers to explore and extend AI solutions within the MindSpore ecosystem.
+本项目是昇思+昇腾开发板的学习资源库，涵盖了从最基础的如何搭建环境，到如何基于昇思套件快速上手大模型的开发、微调、推理全流程，如何基于昇思框架接口从零实现一个简易版大模型的开发、训练、推理全流程的完整学习路径，开源包含课件、代码、实验指导手册、能力认证等丰富资源供开发者进行学习。同时，项目仓汇总了基于 昇思MindSpore 可复现、可扩展的昇腾开发板应用案例，覆盖图像、文本、表格、视频等多模态场景，为各类代表性任务提供可复用的实践方案。
 
-## 📢 News
+## 📢 最新消息
 
-- **2025-11-18 [Feature Optimization]**：Repository refactored for clearer application navigation; added Issue and Pull Request templates for more standardized contributions.
+- 2025-12-17 [功能优化]：重构仓库结构以优化应用导航体验；新增Issue与PR模板，让贡献流程更标准化。
 
-## Prerequisites
+## 前置知识
 
-Before starting this course, you should be familiar with:
+在正式开始学习、实践之前，您需要掌握：
 
-- Basic Python programming
-- Basic Linux commands
-- Using Jupyter Notebook
-- Using Docker images
+- Python基础
+- Linux命令基础
+- Jupyter基础
 
-You can take the Prerequisite Test to assess your readiness.
+您可以通过前置学习考试（*待上线*）进行自检。
 
-## Environment Setup
+## 环境准备
 
-To ensure all example code runs smoothly, set up your environment using one of the following methods.
+在开发前，请确保环境中的各软件包版本已完成配套，详见[环境搭建指南](https://www.mindspore.cn/tutorials/zh-CN/r2.7.1/orange_pi/environment_setup.html)
 
-### Install Dependencies
+## 资源清单
 
-Confirm your Python version meets the course requirements, then run:
+应用案例（通常以 Notebooks 形式呈现）按技术领域分类，各领域下再按模型进一步细分，为开发者提供清晰的索引导航。
 
-```bash
-pip install -r requirements.txt
-```
+| 分类     | 简介                           |
+| :------ | :----------------------------- |
+| [课程(courses)](./courses/)                   | 《昇思+昇腾开发板：软硬结合玩转大模型实战》课程资源汇总，基于昇思套件及框架接口，手把手指导大模型开发、训练、推理全流程，详解混合精度训练等实用技术，以及开发板场景下的常见问题排查、性能优化思路。|
+| [应用案例(applications)](./applications/)     | 基于 昇思MindSpore 的香橙派开发板应用案例，包含图像、文本、表格、视频等多模态任务场景。 |
+| [算子开发(operators_development)](./operators_development/) | 昇腾开发板上的算子开发与自定义算子接入昇思MindSpore框架教程。|
+| [测试工程(test)](./test/) | 昇腾开发板上的算子支持度测试脚本，一键获取当前CANN版本下对应昇思API的算子支持情况。|
 
-### Use Docker Image (*Coming Soon*)
 
-Prebuilt Dockerfiles are provided to simplify environment setup.
+## 常见问题（FAQ）
 
-You can find all course images in the [dockerfile](./dockerfile/) directory and pull the one that fits your hardware.
+详见Wiki中[FAQ](https://github.com/mindspore-courses/applications/wiki/Developer-FAQ)。
 
-For details, see [Using Docker Images](https://github.com/mindspore-courses/applications/wiki/Set-Up-Development-Environment) in Wiki.
+## 贡献与反馈
 
-## Application List
+1. **Issue**：欢迎各位开发者通过 [Issue](https://github.com/mindspore-lab/orange-pi-mindspore/issues) 提交建议或 bug 反馈
 
-The notebooks are organized by domain. Within each domain, notebooks are further grouped by model to provide a clear and scalable structure.
+2. **Pull Request**: 开发者可发起 [PR](https://github.com/mindspore-courses/applications/pulls) 进行Bug修复或代码贡献（提交前请参考[提交规范](https://github.com/mindspore-lab/orange-pi-mindspore/wiki/Contributing-Guidelines)，由Committer @xing-yiren 及另一位Committer 完成评审合入），你的每一份参与都能让本项目更加完善。
 
-| No.  | Domain  | Description                    |
-| :--- | :------ | :----------------------------- |
-| 1 | [CV](./cv/) | Vision models and tasks (classification, detection, segmentation). |
-| 2 | [NLP](./nlp/) | Text processing, sequence modeling, and language understanding tasks. |
-| 3 | [GAN](./gan/) | GAN models for image synthesis and style transfer. |
-| 4 | [Audio](./audio/) | Audio classification, speech tasks, and signal processing examples. |
-| 5 | [Diffusion](./diffusion/) | Diffusion-based generation models and training workflows. |
-| 6 | [LLM](./llm/) | Large language models for text generation, reasoning, and instruction tasks. |
-| 7 | [Multi-Modal](./multi-modal/) | Models combining text, vision, or audio modalities. |
-| 8 | [OrangePi](https://github.com/mindspore-courses/orange-pi-mindspore) | Edge-AI applications on OrangePi with MindSpore. |
-| 9 | [RAG](./rag/) | Retrieval-augmented generation pipelines and examples. |
-| 10 | [Agent](./agent/) | Agent-style workflows and task-oriented intelligent systems. |
+3. **开源项目**：若开发者有符合条件的开源项目推荐/自荐，欢迎按照[项目仓规范](https://github.com/mindspore-lab/orange-pi-mindspore/wiki/Contributing-Guidelines)完善项目内容后，邮件至contact@public.mindspore.cn进行投稿，邮件标题请参考：`【昇思+香橙派项目投稿】项目名称`格式，并在正文中对项目进行简单介绍，附上代码仓链接。
 
-## Awesome projects using MindSpore
+### 提交规范
 
-- [ChatPDF](https://github.com/lvyufeng/ChatPDF): an application that allows users to upload PDF files and interact with pdf using a chatbot.![GitHub Repo stars](https://img.shields.io/github/stars/lvyufeng/ChatPDF)
-- [Emotional-News-Anchor](https://github.com/sunnyxrxrx/Emotional-News-Anchor): an AI-powered news reader that uses LLMs to analyze and broadcast news with emotion-aligned narration.![GitHub Repo stars](https://img.shields.io/github/stars/sunnyxrxrx/Emotional-News-Anchor)
+详见WIKI：[Issue与PR提交规范](https://github.com/mindspore-lab/orange-pi-mindspore/wiki/Contributing-Guidelines)
 
-## Version Management
+### 贡献者展示
 
-This repository is updated in sync with **MindSpore** and the **MindSpore NLP** Suite.
-
-| Branch/Version  | Python | MindSpore | MindSpore NLP |
-| :------ | :----- |:------ |:------ |
-| dev   | >=3.9, <=3.11 | 2.7.0    | 0.5.1    |
-
-## FAQ
-
-See the [FAQ](https://github.com/mindspore-courses/applications/wiki/Developer-FAQ) in the Wiki for details.
-
-## Contributing
-
-1. **Issue**: We welcome bug reports, suggestions and feature requests via [Issues](https://github.com/mindspore-courses/applications/issues).
-
-2. **Pull Requests**： Developers may contribute bug fixes or code enhancements by submitting a [Pull Request](https://github.com/mindspore-courses/applications/pulls). Before submitting, please review the [Contributing Guidelines](https://github.com/mindspore-courses/applications/wiki/Contributing-Guidelines). Each PR will be reviewed and merged by Committer @xing-yiren and at least one additional committer. Your contributions help continuously improve the project.
-
-3. **Open-Source Project Submissions**: If you would like to recommend or self-nominate a qualified open-source project, please first align the repository with the [project repository guidelines](https://github.com/mindspore-courses/applications/wiki/Contributing-Guidelines). Then submit the project via email to [contact@public.mindspore.cn](mailto:contact@public.mindspore.cn) with the subject line: `【MindSpore + OrangePi Project Submission】<Project Name>`. Include a brief project introduction and a link to the source repository in the email body.
-
-## Contributors
-
-Special thanks to all contributors for improving this project!
+向本项目的贡献者们致以最诚挚的感谢！
 
 <div align=center style="margin-top: 30px;">
-  <a href="https://github.com/mindspore-courses/applications/graphs/contributors">
-    <img src="https://contrib.rocks/image?repo=mindspore-courses/applications" />
+  <a href="https://github.com/mindspore-lab/orange-pi-mindspore/graphs/contributors">
+    <img src="https://contrib.rocks/image?repo=mindspore-lab/orange-pi-mindspore" />
   </a>
 </div>

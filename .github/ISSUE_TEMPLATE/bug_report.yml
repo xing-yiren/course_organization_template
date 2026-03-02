@@ -10,7 +10,7 @@ body:
     options:
     - label: 1. I have searched related issues but cannot get the expected help.
     - label: 2. The bug has not been fixed in the latest version.
-    - label: 3. I have read [Contributing Guidlines](https://github.com/mindspore-lab/applications/wiki/Contributing-Guidelines).
+    - label: 3. I have read [Contributing Guidlines](https://github.com/mindspore-lab/orange-pi-mindspore/wiki/Contributing-Guidelines).
     - label: 4. Please note that if the bug-related issue you submitted lacks corresponding environment info and a minimal reproducible demo, it will be challenging for us to reproduce and resolve the issue, reducing the likelihood of receiving feedback.
     - label: 5. If the issue you raised is not a bug but a question, please raise a discussion at Discussions. Otherwise, it will be closed.
 - type: textarea
@@ -32,22 +32,11 @@ body:
       A placeholder for the command.
   validations:
     required: true
-- type: checkboxes
-  id: hardware
-  attributes:
-    label: Hardware Environment
-    description: Which hardware type does this bug relate to (select all that apply)?
-    options:
-      - label: Ascend
-      - label: GPU
-      - label: CPU
-  validations:
-    required: true
 - type: input
   attributes:
-    label: OS Platform
-    description: Which operating system are you using? (e.g., Ubuntu 20.04)
-    placeholder: "Ubuntu 20.04"
+    label: CANN Version
+    description: What version of CANN are you using? (e.g., 8.3.RC1)
+    placeholder: "8.3.RC1"
   validations:
     required: true
 - type: input

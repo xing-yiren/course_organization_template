@@ -22,7 +22,7 @@ Please attach **logs, screenshots or reports** demonstrating that the code runs 
 
 # Checklist
 
-- [ ] Read and followed the [Contributing Guidelines](https://github.com/mindspore-lab/applications/wiki/Contributing-Guidelines).
+- [ ] Read and followed the [Contributing Guidelines](https://github.com/mindspore-lab/orange-pi-mindspore/wiki/Contributing-Guidelines).
 - [ ] Self-tested locally to ensure the code runs correctly and achieves expected results (all CI checks expected to pass).
 - [ ] Updated documentation if needed.
 - [ ] Verified accuracy or performance benchmarks if applicable.

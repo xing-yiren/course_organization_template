@@ -7,24 +7,13 @@ body:
   attributes:
     label: Checklist
     options:
-    - label: 1. I have read [Contributing Guidlines](https://github.com/mindspore-lab/applications/wiki/Contributing-Guidelines).
+    - label: 1. I have read [Contributing Guidlines](https://github.com/mindspore-lab/orange-pi-mindspore/wiki/Contributing-Guidelines).
     - label: 2. If the issue you raised is not a feature but a question, please raise a discussion at Discussions. Otherwise, it will be closed.
 - type: textarea
   attributes:
     label: Motivation
     description: |
       A clear and concise description of the motivation of the feature.
-  validations:
-    required: true
-- type: checkboxes
-  id: hardware
-  attributes:
-    label: Hardware Environment
-    description: Which hardware does this feature need to support (select all that apply)?
-    options:
-      - label: Ascend
-      - label: GPU
-      - label: CPU
   validations:
     required: true
 - type: textarea
