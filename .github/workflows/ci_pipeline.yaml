@@ -46,7 +46,7 @@ jobs:
           VALID_CHANGED_IPYNB=""
           ALL_CHANGED_FILES=""
 
-          # 2. 区分PR/Push场景（参考markdownlint的API+git diff双逻辑）
+          # 2. 区分PR/Push场景
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             # PR场景：优先用GitHub API
             echo "🔍 PR Mode: Get changed files via GitHub API"
@@ -236,9 +236,17 @@ jobs:
           echo ".py files status: ${{ env.PYLINT_PY_STATUS }}"
           echo ".ipynb files status: ${{ env.PYLINT_IPYNB_STATUS }}"
           echo "================================="
-
+          
+          if [ "${{ env.PYLINT_PY_STATUS }}" = "failed" ]; then
+            echo "❌ .py files failed Pylint check. Please check the 'Run Pylint for .py files' step above for detailed errors."
+          fi
+          
+          if [ "${{ env.PYLINT_IPYNB_STATUS }}" = "failed" ]; then
+            echo "❌ .ipynb files failed Pylint check. Please check the 'Run Pylint for .ipynb files' step above for detailed errors."
+          fi
+          
           if [ "${{ env.PYLINT_PY_STATUS }}" = "failed" ] || [ "${{ env.PYLINT_IPYNB_STATUS }}" = "failed" ]; then
-            echo "❌ Pylint check has failed items, CI terminated."
+            echo "❌ Pylint check has failed items, CI terminated. Fix the errors above and try again."
             exit 1
           fi
         shell: bash
@@ -260,7 +268,7 @@ jobs:
           id: get_pr_changed_files
           if: ${{ github.event_name == 'pull_request' }}
           run: |
-            # 1. 区分PR/Push场景（参考markdownlint的API+git diff双逻辑）
+            # 1. 区分PR/Push场景
             if [ "${{ github.event_name }}" = "pull_request" ]; then
               # PR场景：优先用GitHub API
               echo "🔍 PR Mode: Get changed files via GitHub API"
