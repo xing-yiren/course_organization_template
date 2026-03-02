@@ -1,93 +1,46 @@
-<div align=center>
-  <h1>Applications</h1>
-  <p><a href="./README_ZH.md">查看中文</a></p>
+<div align="center">
+  <h1>昇思MindSpore大模型专题课程</h1>
 </div>
 
-This repository provides a curated collection of AI application examples built with **MindSpore**, covering domains such as CV, NLP, GANs, Diffusion Models, LLMs, RAG, and Agents. Each case is organized by **domain** and **model**, offering reusable implementations for representative tasks. It serves as a practical reference for developers to explore and extend AI solutions within the MindSpore ecosystem.
+### 课程特色
 
-## 📢 News
+- ***探究前沿***：解读技术热点，解构热点模型
+- ***应用实践***：理论实践相结合，手把手指导开发
+- ***专家解读***：多领域专家，多元解读
+- ***开源共享***：课程免费，课件代码开源
 
-- **2025-11-18 [Feature Optimization]**：Repository refactored for clearer application navigation; added Issue and Pull Request templates for more standardized contributions.
+### 📢 最新消息
 
-## Prerequisites
+- 2025-12-20 「课程更新」：
+  - 新增DeepSeek系列模型解读（[查看详情](xxxx)）
+  - 新增MindSpore Transformers大模型系列课程
+  - 新增MindSpore兼容式训练系列课程
+  - 新增MindSpore大模型推理系列课程
 
-Before starting this course, you should be familiar with:
 
-- Basic Python programming
-- Basic Linux commands
-- Using Jupyter Notebook
-- Using Docker images
+本**系列课程**理论结合实践深入剖析大模型理论、训练、推理中的关键技术，介绍经典模型的结构设计与创新技术、MindSpore原生大模型训练套件、兼容式大模型训练套件、MindSpore大模型推理套件，课程体系主要包含以下内容：
 
-You can take the Prerequisite Test to assess your readiness.
+| 课程序号 |            课程名称             | 课程简介                                                                                                                                   | 视频 |                                                课件及代码                          |
+|:----:|:---------------------------:|:---------------------------------------------------------------------------------------------------------------------------------------|:----:|:---------------------------------------------------------------------------------------------------:|
+|  01  |           大模型理论课程           | 由浅入深地逐步深入大模型技术，以模型为主线介绍经典模型的结构、训练、推理中的创新技术。                                                                                            | [link](https://www.bilibili.com/video/BV1xs4y1M72q/?spm_id_from=333.999.0.0&vd_source=eb3a45e6eb4dccc5795f97586b78f429) |                             [link](./01.Industry_Model_Introduction/01.Classic_Model_Technical_Analysis/01.BERT/) |
+|  02  | MindSpore Transformers大模型课程 | 基于MindSpore Transformers大模型套件，详细讲解了从环境搭建、预训练、微调至推理部署的大模型全流程开发使用方法，详细讲解了大模型开发迁移、精度对比、性能调优的内容。助力开发者基于MindSpore Transformers进行大模型高阶开发与调优。 | [link](https://www.bilibili.com/video/BV1Gh411w7HC/?spm_id_from=333.999.0.0&vd_source=eb3a45e6eb4dccc5795f97586b78f429) | [link](./01.Industry_Model_Introduction/01.Classic_Model_Technical_Analysis/02.GPT/)                              |
+|  03  |     MindSpore兼容式大模型训练课程     | 围绕大模型预训练、微调、强化学习等场景，介绍了基于MindSpeed-Core-MS套件的全流程开发过程，使得学员能够了解MindSpeed-Core-MS相关概念、特性和开发流程，并初步具备在不同场景下大模型训练的能力。           | [link](xxx) |[link](xxx)|
+|  04  |      MindSpore大模型推理课程       | xxxxx                                                                                                                                  | [link](xxx) |[link](xxx)|
 
-## Environment Setup
+## 贡献与反馈
 
-To ensure all example code runs smoothly, set up your environment using one of the following methods.
+欢迎各位开发者通过 [Issue](https://github.com/mindspore-lab/step_into_llm/issues) 提交建议或 bug 反馈，也可直接发起 [PR](https://github.com/mindspore-lab/step_into_llm/pulls) 进行Bug修复或代码贡献（提交前请参考提交规范，由Committer @username 完成评审合入），你的每一份参与都能让本项目更加完善。
 
-### Install Dependencies
+### 提交规范
 
-Confirm your Python version meets the course requirements, then run:
+详见WIKI：[Issue与PR提交规范](https://github.com/mindspore-lab/step_into_llm/wiki/Contributing-Guidelines)
 
-```bash
-pip install -r requirements.txt
-```
+### 贡献者展示
 
-### Use Docker Image (*Coming Soon*)
-
-Prebuilt Dockerfiles are provided to simplify environment setup.
-
-You can find all course images in the [dockerfile](./dockerfile/) directory and pull the one that fits your hardware.
-
-For details, see [Using Docker Images](https://github.com/mindspore-courses/applications/wiki/Set-Up-Development-Environment) in Wiki.
-
-## Application List
-
-The notebooks are organized by domain. Within each domain, notebooks are further grouped by model to provide a clear and scalable structure.
-
-| No.  | Domain  | Description                    |
-| :--- | :------ | :----------------------------- |
-| 1 | [CV](./cv/) | Vision models and tasks (classification, detection, segmentation). |
-| 2 | [NLP](./nlp/) | Text processing, sequence modeling, and language understanding tasks. |
-| 3 | [GAN](./gan/) | GAN models for image synthesis and style transfer. |
-| 4 | [Audio](./audio/) | Audio classification, speech tasks, and signal processing examples. |
-| 5 | [Diffusion](./diffusion/) | Diffusion-based generation models and training workflows. |
-| 6 | [LLM](./llm/) | Large language models for text generation, reasoning, and instruction tasks. |
-| 7 | [Multi-Modal](./multi-modal/) | Models combining text, vision, or audio modalities. |
-| 8 | [OrangePi](https://github.com/mindspore-courses/orange-pi-mindspore) | Edge-AI applications on OrangePi with MindSpore. |
-| 9 | [RAG](./rag/) | Retrieval-augmented generation pipelines and examples. |
-| 10 | [Agent](./agent/) | Agent-style workflows and task-oriented intelligent systems. |
-
-## Awesome projects using MindSpore
-
-- [ChatPDF](https://github.com/lvyufeng/ChatPDF): an application that allows users to upload PDF files and interact with pdf using a chatbot.![GitHub Repo stars](https://img.shields.io/github/stars/lvyufeng/ChatPDF)
-- [Emotional-News-Anchor](https://github.com/sunnyxrxrx/Emotional-News-Anchor): an AI-powered news reader that uses LLMs to analyze and broadcast news with emotion-aligned narration.![GitHub Repo stars](https://img.shields.io/github/stars/sunnyxrxrx/Emotional-News-Anchor)
-
-## Version Management
-
-This repository is updated in sync with **MindSpore** and the **MindSpore NLP** Suite.
-
-| Branch/Version  | Python | MindSpore | MindSpore NLP |
-| :------ | :----- |:------ |:------ |
-| dev   | >=3.9, <=3.11 | 2.7.0    | 0.5.1    |
-
-## FAQ
-
-See the [FAQ](https://github.com/mindspore-courses/applications/wiki/Developer-FAQ) in the Wiki for details.
-
-## Contributing
-
-1. **Issue**: We welcome bug reports, suggestions and feature requests via [Issues](https://github.com/mindspore-courses/applications/issues).
-
-2. **Pull Requests**： Developers may contribute bug fixes or code enhancements by submitting a [Pull Request](https://github.com/mindspore-courses/applications/pulls). Before submitting, please review the [Contributing Guidelines](https://github.com/mindspore-courses/applications/wiki/Contributing-Guidelines). Each PR will be reviewed and merged by Committer @xing-yiren and at least one additional committer. Your contributions help continuously improve the project.
-
-3. **Open-Source Project Submissions**: If you would like to recommend or self-nominate a qualified open-source project, please first align the repository with the [project repository guidelines](https://github.com/mindspore-courses/applications/wiki/Contributing-Guidelines). Then submit the project via email to [contact@public.mindspore.cn](mailto:contact@public.mindspore.cn) with the subject line: `【MindSpore + OrangePi Project Submission】<Project Name>`. Include a brief project introduction and a link to the source repository in the email body.
-
-## Contributors
-
-Special thanks to all contributors for improving this project!
+向本项目的贡献者们致以最诚挚的感谢！
 
 <div align=center style="margin-top: 30px;">
-  <a href="https://github.com/mindspore-courses/applications/graphs/contributors">
-    <img src="https://contrib.rocks/image?repo=mindspore-courses/applications" />
+  <a href="https://github.com/mindspore-lab/step_into_llm/graphs/contributors">
+    <img src="https://contrib.rocks/image?repo=mindspore-lab/step_into_llm" />
   </a>
 </div>

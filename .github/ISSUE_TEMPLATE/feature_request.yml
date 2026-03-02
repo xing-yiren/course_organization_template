@@ -7,7 +7,7 @@ body:
   attributes:
     label: Checklist
     options:
-    - label: 1. I have read [Contributing Guidlines](https://github.com/mindspore-lab/applications/wiki/Contributing-Guidelines).
+    - label: 1. I have read [Contributing Guidlines](https://github.com/mindspore-lab/step_into_llm/wiki/Contributing-Guidelines).
     - label: 2. If the issue you raised is not a feature but a question, please raise a discussion at Discussions. Otherwise, it will be closed.
 - type: textarea
   attributes:
