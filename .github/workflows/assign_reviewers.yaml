@@ -1,0 +1,173 @@
+name: Auto Assign Reviewers
+
+on:
+  pull_request_target:
+    types: [opened, synchronize]
+
+jobs:
+  get-reviewers:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write  # Required for assign reviewers and comments
+    steps:
+      - name: Generate GitHub App token
+        id: generate-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Parse CODEOWNERS to find reviewers
+        id: codeowners-parser
+        run: |
+          # Check if CODEOWNERS file exists in the standard path
+          if [ ! -f ".github/CODEOWNERS" ]; then
+            echo "CODEOWNERS file not found, skipping all reviewer logic"
+            echo "has_committers=false" >> $GITHUB_OUTPUT
+            echo "all_committers=[]" >> $GITHUB_OUTPUT
+            echo "committer_count=0" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # Extract all valid @-prefixed reviewers from CODEOWNERS, deduplicate and clean format
+          ALL_COMMITTERS=$(grep -o '@[a-zA-Z0-9_-]*' .github/CODEOWNERS | \
+            sed 's/^@//' | \
+            sort | \
+            uniq | \
+            tr '\n' ' ')
+
+          # Count total committers for subsequent tiered judgment
+          COMMITTER_COUNT=$(echo "$ALL_COMMITTERS" | wc -w | tr -d ' ')
+
+          # 关键修复：将输出转为 JS 可直接解析的格式（重点处理带 - 的用户名）
+          if [ -z "$ALL_COMMITTERS" ] || [ "$COMMITTER_COUNT" -eq 0 ]; then
+            echo "No valid committers found in CODEOWNERS"
+            echo "has_committers=false" >> $GITHUB_OUTPUT
+            echo "all_committers=[]" >> $GITHUB_OUTPUT
+            echo "committer_count=0" >> $GITHUB_OUTPUT
+          else
+            echo "Found $COMMITTER_COUNT committers in CODEOWNERS: $ALL_COMMITTERS"
+            echo "has_committers=true" >> $GITHUB_OUTPUT
+            # 修复：将每个用户名用双引号包裹，再转为 JS 数组（兼容带 -、_ 的用户名）
+            ALL_COMMITTERS_JS_ARRAY=$(echo "$ALL_COMMITTERS" | tr ' ' '\n' | awk '{print "\""$0"\""}' | tr '\n' ',' | sed 's/,$//' | sed 's/^/[/;s/$/]/')
+            echo "all_committers=$ALL_COMMITTERS_JS_ARRAY" >> $GITHUB_OUTPUT
+            echo "committer_count=$COMMITTER_COUNT" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Tiered logic for assigning reviewers and commenting
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ steps.generate-token.outputs.token }}
+          script: |
+            // ==================== 精准定位：先打印所有渲染后的变量 ====================
+            console.log("===== 变量渲染结果（用于定位语法错误） =====");
+            console.log("prAuthor:", context.actor);
+            console.log("hasCommitters (渲染后):", ${{ steps.codeowners-parser.outputs.has_committers }});
+            console.log("allCommitters (渲染后):", ${{ steps.codeowners-parser.outputs.all_committers }});
+            console.log("committerCount (渲染后):", ${{ steps.codeowners-parser.outputs.committer_count }});
+            console.log("============================================");
+
+            // ==================== 核心逻辑：修复字符串/数组语法错误 ====================
+            // 1. 变量定义（关键：确保所有字符串/数组符合 JS 语法，兼容带 - 的用户名）
+            const prAuthor = context.actor; // context.actor 本身是 JS 字符串，无需额外处理
+            const hasCommitters = ${{ steps.codeowners-parser.outputs.has_committers }};
+            const allCommitters = ${{ steps.codeowners-parser.outputs.all_committers }};
+            const committerCount = ${{ steps.codeowners-parser.outputs.committer_count }};
+            const prNumber = context.issue.number;
+            const repoInfo = {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: prNumber
+            };
+
+            // 2. 跳过所有逻辑（若无有效 committer）
+            if (!hasCommitters || allCommitters.length === 0 || committerCount === 0) {
+              console.log("No valid committers found in CODEOWNERS, exiting process.");
+              return;
+            }
+
+            // ==================== 新增：过滤空/纯空格的无效 Reviewer（核心修改） ====================
+            // 过滤规则：剔除空字符串、纯空格字符串，确保数组纯净
+            const validAllCommitters = allCommitters.filter(
+              committer => typeof committer === 'string' && committer.trim() !== ''
+            );
+            console.log("===== 过滤后纯净的 Reviewer 列表 =====");
+            console.log("validAllCommitters:", validAllCommitters);
+            console.log("============================================");
+
+            // 兜底：过滤后无有效 reviewer，直接退出
+            if (validAllCommitters.length === 0) {
+              console.log("No valid reviewers after filtering empty/space values, exiting process.");
+              return;
+            }
+
+            // ==================== 三种场景逻辑（基于纯净数组，无脏数据干扰） ====================
+            const isAuthorCommitter = validAllCommitters.includes(prAuthor); // 基于纯净数组判断
+            const otherCommitters = validAllCommitters.filter(committer => committer !== prAuthor); // 基于纯净数组过滤
+
+            // Scenario 1: PR author is NOT a committer - assign all committers and remind
+            if (!isAuthorCommitter) {
+              console.log(`Scenario 1: PR author (${prAuthor}) is not a repo committer, assigning all committers.`);
+              try {
+                await github.rest.pulls.requestReviewers({
+                  ...repoInfo,
+                  reviewers: validAllCommitters // 使用纯净数组分配
+                });
+
+                const reviewerMentions = validAllCommitters.map(c => `@${c}`).join(' '); // 使用纯净数组拼接评论
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: prNumber,
+                  body: `🔔 This PR needs your review: ${reviewerMentions}\nPlease review the code changes at your earliest convenience, and feel free to invite another committer to review as well.`
+                });
+                console.log("Successfully assigned all committers and posted reminder comment.");
+              } catch (error) {
+                console.error("Error in Scenario 1 (assign all committers):", error.message);
+                core.error(`Failed to execute Scenario 1 logic: ${error.message}`);
+              }
+            }
+            // Scenario 2: PR author is a committer, and there are other committers
+            else if (isAuthorCommitter && otherCommitters.length > 0) {
+              console.log(`Scenario 2: PR author (${prAuthor}) is a committer, assigning other ${otherCommitters.length} committers.`);
+              try {
+                await github.rest.pulls.requestReviewers({
+                  ...repoInfo,
+                  reviewers: otherCommitters // 使用纯净数组的过滤结果分配
+                });
+
+                const otherReviewerMentions = otherCommitters.map(c => `@${c}`).join(' ');
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: prNumber,
+                  body: `🔔 This PR needs your review: ${otherReviewerMentions}\nPR author (@${prAuthor}) is a repo committer and has been excluded from automatic assignment. Please review the code changes at your earliest convenience.`
+                });
+                console.log("Successfully assigned other committers and posted reminder comment.");
+              } catch (error) {
+                console.error("Error in Scenario 2 (assign other committers):", error.message);
+                core.error(`Failed to execute Scenario 2 logic: ${error.message}`);
+              }
+            }
+            // Scenario 3: PR author is the ONLY committer
+            else {
+              console.log(`Scenario 3: PR author (${prAuthor}) is the only repo committer, posting manual assignment reminder.`);
+              try {
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: prNumber,
+                  body: `⚠️ Reminder for @${prAuthor}\nYou are the only repository committer, and PR author cannot review your own PR.\nPlease manually assign valid reviewers to complete the review process.`
+                });
+                console.log("Successfully posted manual assignment reminder to PR author.");
+              } catch (error) {
+                console.error("Error in Scenario 3 (remind manual assignment):", error.message);
+                core.error(`Failed to execute Scenario 3 logic: ${error.message}`);
+              }
+            }
