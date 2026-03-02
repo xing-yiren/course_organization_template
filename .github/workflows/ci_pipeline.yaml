@@ -10,7 +10,7 @@ on:
     branches: [ "*" ]
 
   # Allows you to run this workflow manually from the Actions tab
-  workflow_dispatch:
+  #workflow_dispatch:
 
 # A workflow run is made up of one or more jobs that can run sequentially or in parallel
 jobs:
@@ -46,7 +46,7 @@ jobs:
           VALID_CHANGED_IPYNB=""
           ALL_CHANGED_FILES=""
 
-          # 2. 区分PR/Push场景（参考markdownlint的API+git diff双逻辑）
+          # 2. 区分PR/Push场景
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             # PR场景：优先用GitHub API
             echo "🔍 PR Mode: Get changed files via GitHub API"
@@ -55,12 +55,17 @@ jobs:
               sudo apt update && sudo apt install jq -y
             fi
             # 调用API获取PR改动文件（排除删除的）
-            ALL_CHANGED_FILES=$(curl -s \
-              -H "Authorization: token ${{ github.token }}" \  # 用默认token即可，无需App Token
-              -H "Accept: application/vnd.github+json" \
-              -H "X-GitHub-Api-Version: 2022-11-28" \
-              "https://api.github.com/repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files" \
-              | jq -r '.[] | select(.status != "removed") | .filename')
+            # 定义curl参数数组
+            CURL_ARGS=(
+              -s
+              -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}"
+              -H "Accept: application/vnd.github+json"
+              -H "X-GitHub-Api-Version: 2022-11-28"
+              "https://api.github.com/repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files"
+            )
+            
+            # 执行curl
+            ALL_CHANGED_FILES=$(curl "${CURL_ARGS[@]}" | jq -r '.[] | select(.status != "removed") | .filename')
           else
             # Push场景：用git diff
             echo "🔍 Push Mode: Get changed files via git diff"
@@ -90,9 +95,23 @@ jobs:
           VALID_CHANGED_IPYNB=$(echo "$VALID_CHANGED_IPYNB" | sed '/^$/d')
 
           # 5. 导出环境变量
-          # 生成带空格的路径字符串（用于pylint命令）
-          PY_FILES_STR=$(echo "$VALID_CHANGED_PY" | tr '\n' ' ' | sed 's/ $//')
-          IPYNB_FILES_STR=$(echo "$VALID_CHANGED_IPYNB" | tr '\n' ' ' | sed 's/ $//')
+          # 为每个文件添加单引号，正确处理空格
+              PY_FILES_ARGS=""
+              while IFS= read -r file; do
+                if [ -n "$file" ]; then
+                  PY_FILES_ARGS+=" '$file'"
+                fi
+              done <<< "$VALID_CHANGED_PY"
+              PY_FILES_ARGS=$(echo "$PY_FILES_ARGS" | sed 's/^ //')  # 移除开头的空格
+          
+              IPYNB_FILES_ARGS=""
+              while IFS= read -r file; do
+                if [ -n "$file" ]; then
+                  IPYNB_FILES_ARGS+=" '$file'"
+                fi
+              done <<< "$VALID_CHANGED_IPYNB"
+              IPYNB_FILES_ARGS=$(echo "$IPYNB_FILES_ARGS" | sed 's/^ //')
+
           # 统计文件数量
           PY_FILE_COUNT=$(echo "$VALID_CHANGED_PY" | wc -l | tr -d ' ')
           IPYNB_FILE_COUNT=$(echo "$VALID_CHANGED_IPYNB" | wc -l | tr -d ' ')
@@ -109,9 +128,9 @@ jobs:
           echo "$VALID_CHANGED_IPYNB" >> "$GITHUB_ENV"
           echo "EOF" >> "$GITHUB_ENV"
 
-          echo "PY_FILES=$PY_FILES_STR" >> "$GITHUB_ENV"
+          echo "PY_FILES_ARGS=$PY_FILES_ARGS" >> "$GITHUB_ENV"
           echo "PY_FILE_COUNT=$PY_FILE_COUNT" >> "$GITHUB_ENV"
-          echo "IPYNB_FILES=$IPYNB_FILES_STR" >> "$GITHUB_ENV"
+          echo "IPYNB_FILES_ARGS=$IPYNB_FILES_ARGS" >> "$GITHUB_ENV"
           echo "IPYNB_FILE_COUNT=$IPYNB_FILE_COUNT" >> "$GITHUB_ENV"
 
           # 6. 打印结果（和markdownlint的输出格式对齐）
@@ -129,16 +148,39 @@ jobs:
         run: |
           NUM_CORES=$(nproc)
           echo "🔧 Running Pylint on modified .py files..."
-          pylint ${{ env.PY_FILES }} --jobs=$NUM_CORES --rcfile=.github/pylint.conf > pylint_py_logs.txt 2>&1 || true
 
-          if [ $? -eq 0 ]; then
+          PY_FILES=(
+            ${{ env.PY_FILES_ARGS }}
+          )
+          
+          # 执行 Pylint
+          pylint "${PY_FILES[@]}" --jobs=$NUM_CORES --rcfile=.github/pylint.conf 2>&1 | tee pylint_py_logs.txt
+
+          # 捕获 Pylint 的真实退出码（PIPESTATUS[0] 获取管道第一个命令的退出码）
+          PYLINT_EXIT_CODE=${PIPESTATUS[0]}
+
+          # 保存状态到文件（而不是环境变量），避免步骤间干扰
+          echo "$PYLINT_EXIT_CODE" > pylint_py_exit_code.txt
+
+          # 根据真实退出码判断结果
+          if [ $PYLINT_EXIT_CODE -eq 0 ]; then
             echo "✅ .py files Pylint check passed"
-            echo "PYLINT_PY_STATUS=success" >> "$GITHUB_ENV"
           else
             echo "❌ .py files Pylint check failed, see details in pylint_py_logs.txt"
+          fi
+        shell: bash
+        continue-on-error: true  # 允许这一步失败但不影响后续步骤
+
+      - name: Set Pylint .py Status
+        if: ${{ env.PY_FILE_COUNT > 0 }}
+        run: |
+          if [ -f pylint_py_exit_code.txt ] && [ "$(cat pylint_py_exit_code.txt)" = "0" ]; then
+            echo "PYLINT_PY_STATUS=success" >> "$GITHUB_ENV"
+          else
             echo "PYLINT_PY_STATUS=failed" >> "$GITHUB_ENV"
           fi
         shell: bash
+
 
       - name: Skip Pylint for .py (no files)
         if: ${{ env.PY_FILE_COUNT == 0 }}
@@ -152,13 +194,32 @@ jobs:
         run: |
           NUM_CORES=$(nproc)
           echo "🔧 Running Pylint on modified .ipynb files..."
-          nbqa pylint ${{ env.IPYNB_FILES }} --jobs=$NUM_CORES --rcfile=.github/pylint.conf > pylint_ipynb_logs.txt 2>&1 || true
 
-          if [ $? -eq 0 ]; then
+          IPYNB_FILES=(
+            ${{ env.IPYNB_FILES_ARGS }}
+          )
+          nbqa pylint "${IPYNB_FILES[@]}" --jobs=$NUM_CORES --rcfile=.github/pylint.conf  2>&1 | tee pylint_ipynb_logs.txt
+
+          # 捕获退出码（注意：nbqa 的退出码可能不同于 pylint）
+          NBQA_EXIT_CODE=${PIPESTATUS[0]}
+          
+          # 保存状态
+          echo "$NBQA_EXIT_CODE" > pylint_ipynb_exit_code.txt
+
+          if [ $NBQA_EXIT_CODE -eq 0 ]; then
             echo "✅ .ipynb files Pylint check passed"
-            echo "PYLINT_IPYNB_STATUS=success" >> "$GITHUB_ENV"
           else
             echo "❌ .ipynb files Pylint check failed, see details in pylint_ipynb_logs.txt"
+          fi
+        shell: bash
+        continue-on-error: true  # 允许这一步失败但不影响后续步骤
+
+      - name: Set Pylint .ipynb Status
+        if: ${{ env.IPYNB_FILE_COUNT > 0 }}
+        run: |
+          if [ -f pylint_ipynb_exit_code.txt ] && [ "$(cat pylint_ipynb_exit_code.txt)" = "0" ]; then
+            echo "PYLINT_IPYNB_STATUS=success" >> "$GITHUB_ENV"
+          else
             echo "PYLINT_IPYNB_STATUS=failed" >> "$GITHUB_ENV"
           fi
         shell: bash
@@ -175,9 +236,17 @@ jobs:
           echo ".py files status: ${{ env.PYLINT_PY_STATUS }}"
           echo ".ipynb files status: ${{ env.PYLINT_IPYNB_STATUS }}"
           echo "================================="
-
+          
+          if [ "${{ env.PYLINT_PY_STATUS }}" = "failed" ]; then
+            echo "❌ .py files failed Pylint check. Please check the 'Run Pylint for .py files' step above for detailed errors."
+          fi
+          
+          if [ "${{ env.PYLINT_IPYNB_STATUS }}" = "failed" ]; then
+            echo "❌ .ipynb files failed Pylint check. Please check the 'Run Pylint for .ipynb files' step above for detailed errors."
+          fi
+          
           if [ "${{ env.PYLINT_PY_STATUS }}" = "failed" ] || [ "${{ env.PYLINT_IPYNB_STATUS }}" = "failed" ]; then
-            echo "❌ Pylint check has failed items, CI terminated."
+            echo "❌ Pylint check has failed items, CI terminated. Fix the errors above and try again."
             exit 1
           fi
         shell: bash
@@ -185,41 +254,51 @@ jobs:
   markdownlint-check:
       name: Markdownlint Check
       runs-on: ubuntu-latest
+      permissions:
+        contents: read
+        pull-requests: write  # Required for assign reviewers and comments
 
       steps:
         - name: Checkout Code
           uses: actions/checkout@v4
           with:
             fetch-depth: 1
-
-        - name: Generate GitHub App token
-          id: generate-token
-          uses: actions/create-github-app-token@v1
-          with:
-            app-id: ${{ secrets.APP_ID }}
-            private-key: ${{ secrets.APP_PRIVATE_KEY }}
-
+            
         - name: Get PR changed .ipynb and .md files
           id: get_pr_changed_files
           if: ${{ github.event_name == 'pull_request' }}
           run: |
-            # 1. 仅安装必需依赖：jq（解析 API 返回的 JSON）
-            if ! command -v jq &> /dev/null; then
-              sudo apt update && sudo apt install jq -y
+            # 1. 区分PR/Push场景
+            if [ "${{ github.event_name }}" = "pull_request" ]; then
+              # PR场景：优先用GitHub API
+              echo "🔍 PR Mode: Get changed files via GitHub API"
+              # 安装jq（解析 API 返回的 JSON）
+              if ! command -v jq &> /dev/null; then
+                sudo apt update && sudo apt install jq -y
+              fi
+              # 调用API获取PR改动文件（排除删除的）
+              # 定义curl参数数组
+              CURL_ARGS=(
+                -s
+                -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}"
+                -H "Accept: application/vnd.github+json"
+                -H "X-GitHub-Api-Version: 2022-11-28"
+                "https://api.github.com/repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files"
+              )
+              
+              # 执行curl
+              ALL_CHANGED_FILES=$(curl "${CURL_ARGS[@]}" | jq -r '.[] | select(.status != "removed") | .filename')
+            else
+              # Push场景：用git diff
+              echo "🔍 Push Mode: Get changed files via git diff"
+              if git rev-parse --verify HEAD^ >/dev/null 2>&1; then
+                ALL_CHANGED_FILES=$(git diff --name-only HEAD^ HEAD --diff-filter=ACMRT)
+              else
+                ALL_CHANGED_FILES=$(git ls-files)  # 首次提交兜底
+              fi
             fi
 
-            # 2. 直接获取 GitHub App Token
-            APP_TOKEN="${{ steps.generate-token.outputs.token }}"
-
-            # 3. 核心：调用 GitHub API 获取 PR 改动文件（仅新增/修改，排除删除）
-            ALL_CHANGED_FILES=$(curl -s \
-              -H "Authorization: Bearer $APP_TOKEN" \
-              -H "Accept: application/vnd.github+json" \
-              -H "X-GitHub-Api-Version: 2022-11-28" \
-              "https://api.github.com/repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files" \
-              | jq -r '.[] | select(.status != "removed") | .filename')
-
-            # 4. 筛选：改动的 .ipynb 和 .md 文件（仅保留存在且非空的）
+            # 2. 筛选：改动的 .ipynb 和 .md 文件（仅保留存在且非空的）
             VALID_CHANGED_IPYNB=""
             VALID_CHANGED_MD=""
 
@@ -237,7 +316,7 @@ jobs:
               fi
             done <<< "$ALL_CHANGED_FILES"
 
-            # 去除末尾空行，导出为环境变量（供后续步骤使用）
+            # 3. 去除末尾空行，导出为环境变量（供后续步骤使用）
             VALID_CHANGED_IPYNB=$(echo "$VALID_CHANGED_IPYNB" | sed '/^$/d')
             VALID_CHANGED_MD=$(echo "$VALID_CHANGED_MD" | sed '/^$/d')
 
@@ -249,7 +328,7 @@ jobs:
             echo "$VALID_CHANGED_MD" >> "$GITHUB_ENV"
             echo "EOF" >> "$GITHUB_ENV"
 
-            # 打印结果
+            # 4. 打印结果
             echo "======================================"
             echo "===== PR Changed Files Summary ====="
             echo "✅  Changed .ipynb files (to extract):"
