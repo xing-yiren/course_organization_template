@@ -143,6 +143,17 @@ jobs:
           echo "======================================"
         shell: bash
 
+      - name: Check and Install Pylint (if needed)
+        run: |
+          # 检查 pylint 是否已安装
+          if command -v pylint &> /dev/null; then
+            echo "✅ Pylint is already installed: $(pylint --version | head -n 1)"
+          else
+            echo "📦 Pylint not found, installing..."
+            pip install pylint
+            echo "✅ Pylint installation completed: $(pylint --version | head -n 1)"
+          fi
+
       - name: Run Pylint for .py files
         if: ${{ env.PY_FILE_COUNT > 0 }}
         run: |
