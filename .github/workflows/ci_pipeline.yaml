@@ -27,11 +27,6 @@ env:
   LC_ALL: C.UTF-8
   PYTHONIOENCODING: utf-8
   PYTHONUTF8: 1
-  GIT_CONFIG_COUNT: 2
-  GIT_CONFIG_KEY_0: core.quotepath
-  GIT_CONFIG_VALUE_0: false
-  GIT_CONFIG_KEY_1: core.precomposeunicode
-  GIT_CONFIG_VALUE_1: true
 
 # A workflow run is made up of one or more jobs that can run sequentially or in parallel
 jobs:
@@ -52,10 +47,6 @@ jobs:
           
       - name: Setup Environment for Unicode
         run: |
-          # Configure system locale
-          sudo locale-gen en_US.UTF-8
-          sudo update-locale LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8
-          
           # Configure git for Unicode filenames
           git config --global core.quotepath false
           git config --global core.precomposeunicode true
@@ -64,7 +55,6 @@ jobs:
           echo "✅ Environment configured:"
           echo "  LANG: $LANG"
           echo "  LC_ALL: $LC_ALL"
-          echo "  Git quotepath: $(git config --global core.quotepath)"
         shell: bash
 
       - name: Set up Python
@@ -77,7 +67,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip==24.0
           pip install torch --index-url https://download.pytorch.org/whl/cpu
-          pip install pylint nbqa jq
+          pip install pylint nbqa
           if [ -f "requirements.txt" ]; then 
             pip install -r requirements.txt
           fi
@@ -157,11 +147,17 @@ jobs:
                 while true; do
                   echo "Fetching page $PAGE..."
                   
-                  # API call
-                  if ! curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-                         -H "Accept: application/vnd.github+json" \
-                         "https://api.github.com/repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files?per_page=100&page=$PAGE" \
-                         -o "$TEMP_JSON"; then
+                  # Define curl arguments as an array
+                  CURL_ARGS=(
+                    -s
+                    -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}"
+                    -H "Accept: application/vnd.github+json"
+                    -H "X-GitHub-Api-Version: 2022-11-28"
+                    "https://api.github.com/repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files?per_page=100&page=$PAGE"
+                  )
+                  
+                  # Execute curl with arguments array
+                  if ! curl "${CURL_ARGS[@]}" -o "$TEMP_JSON"; then
                     echo "❌ Failed to fetch page $PAGE" >> "$ERROR_LOG"
                     break
                   fi
@@ -234,7 +230,6 @@ jobs:
 import os
 import sys
 import json
-import base64
 from pathlib import Path
 
 # Setup
@@ -339,13 +334,15 @@ EOF
             echo "VALID_CHANGED_IPYNB<<EOF_IPYNB"
             echo "$VALID_CHANGED_IPYNB"
             echo "EOF_IPYNB"
-            
-            if [ -n "$ERRORS" ]; then
+          } >> "$GITHUB_ENV"
+
+          if [ -n "$ERRORS" ]; then
+            {
               echo "FILE_DETECTION_ERRORS<<EOF_ERR"
               echo "$ERRORS"
               echo "EOF_ERR"
-            fi
-          } >> "$GITHUB_ENV"
+            } >> "$GITHUB_ENV"
+          fi
           
           # Count files
           PY_FILE_COUNT=$(echo "$VALID_CHANGED_PY" | grep -c '^' || echo "0")
@@ -356,7 +353,11 @@ EOF
           
           # Create a JSON file for later steps (safe for Unicode)
           mkdir -p .ci-cache
-          cp "$TEMP_DIR/files.json" .ci-cache/pylint-files.json 2>/dev/null || echo '{"py":[],"ipynb":[]}' > .ci-cache/pylint-files.json
+          if [ -f "$TEMP_DIR/files.json" ]; then
+            cp "$TEMP_DIR/files.json" .ci-cache/pylint-files.json
+          else
+            echo '{"py":[],"ipynb":[],"errors":[]}' > .ci-cache/pylint-files.json
+          fi
           
           # Print summary
           echo "======================================"
@@ -794,10 +795,17 @@ EOF
             TEMP_JSON="$TEMP_DIR/api_response.json"
             
             while true; do
-              if ! curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-                     -H "Accept: application/vnd.github+json" \
-                     "https://api.github.com/repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files?per_page=100&page=$PAGE" \
-                     -o "$TEMP_JSON"; then
+              # Define curl arguments as an array
+              CURL_ARGS=(
+                -s
+                -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}"
+                -H "Accept: application/vnd.github+json"
+                -H "X-GitHub-Api-Version: 2022-11-28"
+                "https://api.github.com/repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files?per_page=100&page=$PAGE"
+              )
+              
+              # Execute curl with arguments array
+              if ! curl "${CURL_ARGS[@]}" -o "$TEMP_JSON"; then
                 echo "❌ Failed to fetch page $PAGE" >> "$ERROR_LOG"
                 break
               fi
@@ -913,17 +921,23 @@ EOF
             echo "VALID_CHANGED_MD<<EOF_MD"
             echo "$VALID_CHANGED_MD"
             echo "EOF_MD"
-            
-            if [ -n "$ERRORS" ]; then
+          } >> "$GITHUB_ENV"
+          
+          if [ -n "$ERRORS" ]; then
+            {
               echo "MD_DETECTION_ERRORS<<EOF_ERR"
               echo "$ERRORS"
               echo "EOF_ERR"
-            fi
-          } >> "$GITHUB_ENV"
+            } >> "$GITHUB_ENV"
+          fi
           
           # Save JSON for later steps
           mkdir -p .ci-cache
-          cp "$TEMP_DIR/markdown-files.json" .ci-cache/markdown-files.json 2>/dev/null || echo '{"ipynb":[],"md":[]}' > .ci-cache/markdown-files.json
+          if [ -f "$TEMP_DIR/markdown-files.json" ]; then
+            cp "$TEMP_DIR/markdown-files.json" .ci-cache/markdown-files.json
+          else
+            echo '{"ipynb":[],"md":[],"errors":[]}' > .ci-cache/markdown-files.json
+          fi
           
           # Print summary
           echo "======================================"
