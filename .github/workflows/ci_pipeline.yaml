@@ -1,4 +1,5 @@
-# This is a workflow for Pylint check.
+# This is a workflow for Pylint and Markdownlint check.
+# Version: 2.0 - Enhanced Unicode support and error handling
 
 name: CI Pipeline
 
@@ -8,27 +9,63 @@ on:
     branches: [ "*" ]
   pull_request:
     branches: [ "*" ]
-
   # Allows you to run this workflow manually from the Actions tab
   workflow_dispatch:
+    inputs:
+      debug_enabled:
+        description: 'Enable debug mode'
+        type: boolean
+        default: false
+      force_check_all:
+        description: 'Force check all files (ignore changes)'
+        type: boolean
+        default: false
+
+# Global environment settings for Unicode support
+env:
+  LANG: C.UTF-8
+  LC_ALL: C.UTF-8
+  PYTHONIOENCODING: utf-8
+  PYTHONUTF8: 1
+  GIT_CONFIG_COUNT: 2
+  GIT_CONFIG_KEY_0: core.quotepath
+  GIT_CONFIG_VALUE_0: false
+  GIT_CONFIG_KEY_1: core.precomposeunicode
+  GIT_CONFIG_VALUE_1: true
 
 # A workflow run is made up of one or more jobs that can run sequentially or in parallel
 jobs:
   pylint-check:
     name: Pylint Check
     runs-on: ubuntu-latest
-    timeout-minutes: 30  # 防止长时间运行
-    
-    # 添加重试机制的环境变量
-    env:
-      RETRY_COUNT: 3
-      RETRY_DELAY: 5
+    timeout-minutes: 15
+    # Add concurrency to cancel outdated runs
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.ref }}-pylint
+      cancel-in-progress: true
 
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # 需要完整历史用于文件比较
+          fetch-depth: 0  # Need full history for git diff
+          
+      - name: Setup Environment for Unicode
+        run: |
+          # Configure system locale
+          sudo locale-gen en_US.UTF-8
+          sudo update-locale LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8
+          
+          # Configure git for Unicode filenames
+          git config --global core.quotepath false
+          git config --global core.precomposeunicode true
+          
+          # Show environment info
+          echo "✅ Environment configured:"
+          echo "  LANG: $LANG"
+          echo "  LC_ALL: $LC_ALL"
+          echo "  Git quotepath: $(git config --global core.quotepath)"
+        shell: bash
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -38,472 +75,459 @@ jobs:
 
       - name: Install dependencies
         run: |
-          # 升级 pip
           python -m pip install --upgrade pip==24.0
-          
-          # 安装 PyTorch (CPU版本)
           pip install torch --index-url https://download.pytorch.org/whl/cpu
-          
-          # 安装 requirements.txt 中的依赖
+          pip install pylint nbqa jq
           if [ -f "requirements.txt" ]; then 
-            echo "📦 Installing dependencies from requirements.txt..."
             pip install -r requirements.txt
           fi
           
-          # 检查并安装 pylint（如果未安装）
-          if ! command -v pylint &> /dev/null; then
-            echo "📦 Pylint not found, installing..."
-            pip install pylint
-            echo "✅ Pylint installation completed: $(pylint --version | head -n 1)"
-          else
-            echo "✅ Pylint is already installed: $(pylint --version | head -n 1)"
-          fi
-
-          # 检查并安装 nbqa（用于 Jupyter Notebook 检查）
-          if ! command -v nbqa &> /dev/null; then
-            echo "📦 nbqa not found, installing..."
-            pip install nbqa
-            echo "✅ nbqa installation completed: $(nbqa --version 2>/dev/null || echo 'installed')"
-          else
-            echo "✅ nbqa is already installed"
-          fi
+          # Verify installations
+          echo "✅ Installed versions:"
+          echo "  Pylint: $(pylint --version | head -1)"
+          echo "  Python: $(python --version)"
         shell: bash
 
-      # ==================== 增强的文件检测模块 ====================
-      - name: Get Modified .py/.ipynb Files (Enhanced)
+      - name: Debug - Show Environment
+        if: ${{ github.event.inputs.debug_enabled == 'true' }}
+        run: |
+          echo "🔍 Debug Mode Enabled"
+          echo "Event: ${{ github.event_name }}"
+          echo "Repository: ${{ github.repository }}"
+          echo "Branch: ${{ github.ref }}"
+          echo "Force check all: ${{ github.event.inputs.force_check_all }}"
+          echo "Current directory: $(pwd)"
+          echo "Files in repo:"
+          find . -type f -name "*.py" -o -name "*.ipynb" | head -20
+        shell: bash
+
+      - name: Get Modified Files (Enhanced Unicode Support)
         id: get_modified_files
         run: |
+          # Enable strict mode but careful with IFS
           set -euo pipefail
           
-          # 初始化变量
-          VALID_CHANGED_PY=""
-          VALID_CHANGED_IPYNB=""
-          ALL_CHANGED_FILES=""
-          DELETED_FILES=""
-          ERROR_LOG="file_detection_errors.log"
+          # Create temp directory for file lists
+          TEMP_DIR=$(mktemp -d)
+          VALID_PY_FILE="$TEMP_DIR/valid_py.txt"
+          VALID_IPYNB_FILE="$TEMP_DIR/valid_ipynb.txt"
+          ALL_FILES_FILE="$TEMP_DIR/all_files.txt"
+          ERROR_LOG="$TEMP_DIR/errors.log"
           
-          # 创建临时目录
-          TMP_DIR=$(mktemp -d)
-          trap "rm -rf $TMP_DIR" EXIT
+          # Initialize files
+          > "$VALID_PY_FILE"
+          > "$VALID_IPYNB_FILE"
+          > "$ALL_FILES_FILE"
+          > "$ERROR_LOG"
           
-          # 获取改动文件的函数（统一方法）
-          get_changed_files() {
-            local files=""
-            
-            # 检查是否是PR事件
+          echo "🔍 Detecting changed files..."
+          
+          # Determine if we should force check all files
+          FORCE_ALL="${{ github.event.inputs.force_check_all == 'true' }}"
+          
+          if [ "$FORCE_ALL" = "true" ]; then
+            echo "🔧 Force check all files enabled"
+            ALL_CHANGED_FILES=$(git ls-files)
+          else
+            # Get changed files based on event type
             if [ "${{ github.event_name }}" = "pull_request" ]; then
-              echo "🔍 PR Mode: Using git diff with PR base"
+              echo "🔍 PR Mode: Getting changed files via GitHub API (with pagination)"
               
-              # 获取PR的基础commit
-              if [ -n "${{ github.event.pull_request.base.sha }}" ] && [ -n "${{ github.event.pull_request.head.sha }}" ]; then
-                BASE_SHA="${{ github.event.pull_request.base.sha }}"
-                HEAD_SHA="${{ github.event.pull_request.head.sha }}"
-                files=$(git diff --name-only "$BASE_SHA" "$HEAD_SHA" --diff-filter=ACMRT 2>/dev/null || echo "")
+              # Install jq if needed
+              if ! command -v jq &> /dev/null; then
+                sudo apt update && sudo apt install jq -y
               fi
               
-              # 如果git diff失败，尝试使用GitHub API（带重试）
-              if [ -z "$files" ]; then
-                echo "⚠️ Git diff failed, trying GitHub API with retry..."
+              # API call with pagination and retry
+              MAX_RETRIES=3
+              RETRY_COUNT=0
+              API_SUCCESS=false
+              PAGE=1
+              TEMP_JSON="$TEMP_DIR/api_response.json"
+              
+              while [ $RETRY_COUNT -lt $MAX_RETRIES ] && [ "$API_SUCCESS" = "false" ]; do
+                if [ $RETRY_COUNT -gt 0 ]; then
+                  echo "Retry $RETRY_COUNT of $MAX_RETRIES..."
+                  sleep 5
+                fi
                 
-                # 带重试的API调用
-                for i in $(seq 1 ${{ env.RETRY_COUNT }}); do
-                  echo "Attempt $i of ${{ env.RETRY_COUNT }}..."
+                PAGE=1
+                > "$ALL_FILES_FILE"
+                
+                while true; do
+                  echo "Fetching page $PAGE..."
                   
-                  # 调用API获取PR改动文件
-                  # 定义curl参数数组
-                  CURL_ARGS=(
-                    -s
-                    -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}"
-                    -H "Accept: application/vnd.github+json"
-                    -H "X-GitHub-Api-Version: 2022-11-28"
-                    "https://api.github.com/repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files"
-                  )
-            
-                  # 执行curl
-                  API_RESPONSE=$(curl "${CURL_ARGS[@]}")
-                  
-                  # 检查是否限流
-                  if echo "$API_RESPONSE" | grep -q "API rate limit"; then
-                    echo "⚠️ API rate limit hit, waiting ${{ env.RETRY_DELAY }} seconds..."
-                    sleep ${{ env.RETRY_DELAY }}
-                    continue
-                  fi
-                  
-                  # 解析响应
-                  files=$(echo "$API_RESPONSE" | jq -r '.[] | select(.status != "removed") | .filename' 2>/dev/null || echo "")
-                  
-                  if [ -n "$files" ]; then
-                    echo "✅ Successfully got files from API"
+                  # API call
+                  if ! curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+                         -H "Accept: application/vnd.github+json" \
+                         "https://api.github.com/repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files?per_page=100&page=$PAGE" \
+                         -o "$TEMP_JSON"; then
+                    echo "❌ Failed to fetch page $PAGE" >> "$ERROR_LOG"
                     break
                   fi
+                  
+                  # Check if response is valid JSON
+                  if ! jq empty "$TEMP_JSON" 2>/dev/null; then
+                    echo "❌ Invalid JSON response" >> "$ERROR_LOG"
+                    break
+                  fi
+                  
+                  # Check if we got an error from API
+                  if jq -e '.message' "$TEMP_JSON" > /dev/null 2>&1; then
+                    ERROR_MSG=$(jq -r '.message' "$TEMP_JSON")
+                    echo "❌ API Error: $ERROR_MSG" >> "$ERROR_LOG"
+                    break
+                  fi
+                  
+                  # Extract filenames (not removed)
+                  jq -r '.[] | select(.status != "removed") | .filename' "$TEMP_JSON" >> "$ALL_FILES_FILE"
+                  
+                  # Check if this is the last page
+                  FILE_COUNT=$(jq length "$TEMP_JSON")
+                  if [ "$FILE_COUNT" -lt 100 ]; then
+                    break
+                  fi
+                  
+                  PAGE=$((PAGE + 1))
                 done
-              fi
-            else
-              # Push场景
-              echo "🔍 Push Mode: Using git diff"
-              
-              # 检查是否有父commit
-              if git rev-parse --verify HEAD^ >/dev/null 2>&1; then
-                # 有父commit
-                if git merge-base HEAD HEAD^ >/dev/null 2>&1; then
-                  # 正常情况
-                  files=$(git diff --name-only HEAD^ HEAD --diff-filter=ACMRT 2>/dev/null || echo "")
+                
+                if [ -s "$ALL_FILES_FILE" ]; then
+                  API_SUCCESS=true
                 else
-                  # Merge commit
-                  files=$(git diff --name-only HEAD~1 HEAD --diff-filter=ACMRT 2>/dev/null || echo "")
+                  RETRY_COUNT=$((RETRY_COUNT + 1))
                 fi
+              done
+              
+              if [ "$API_SUCCESS" = "true" ]; then
+                ALL_CHANGED_FILES=$(cat "$ALL_FILES_FILE")
               else
-                # 首次提交
-                echo "🎉 First commit detected"
-                
-                # 方法1: 使用git show
-                files=$(git show --name-only --format=format:'' HEAD 2>/dev/null | grep -v '^$' || echo "")
-                
-                # 方法2: 如果上面失败，使用git ls-files（但只包括本次提交的）
-                if [ -z "$files" ]; then
-                  # 获取首次提交的树对象
-                  TREE_HASH=$(git rev-parse HEAD^{tree})
-                  files=$(git ls-tree -r --name-only "$TREE_HASH" 2>/dev/null || echo "")
-                fi
-                
-                # 方法3: 最后兜底，列出所有文件
-                if [ -z "$files" ]; then
-                  echo "⚠️ Falling back to listing all files"
-                  files=$(find . -type f -not -path "./.git/*" -printf '%P\n' 2>/dev/null || echo "")
-                fi
-              fi
-            fi
-            
-            echo "$files"
-          }
-          
-          # 获取改动文件
-          ALL_CHANGED_FILES=$(get_changed_files)
-          
-          # 验证文件存在性和可读性
-          validate_file() {
-            local file="$1"
-            
-            # 检查文件是否存在
-            if [ ! -e "$file" ]; then
-              echo "DELETED: $file" >> "$ERROR_LOG"
-              return 1
-            fi
-            
-            # 检查是否是符号链接且目标存在
-            if [ -L "$file" ] && [ ! -e "$(readlink "$file")" ]; then
-              echo "BROKEN_SYMLINK: $file" >> "$ERROR_LOG"
-              return 1
-            fi
-            
-            # 检查文件是否可读
-            if [ ! -r "$file" ]; then
-              echo "UNREADABLE: $file" >> "$ERROR_LOG"
-              return 1
-            fi
-            
-            # 检查文件是否为空（可选）
-            if [ ! -s "$file" ]; then
-              echo "EMPTY: $file" >> "$ERROR_LOG"
-              # 可以选择返回0以包含空文件，或返回1以排除
-              return 0  # 包含空文件，让lint工具决定
-            fi
-            
-            return 0
-          }
-          
-          # 分类筛选文件
-          while IFS= read -r file; do
-            [ -z "$file" ] && continue
-            
-            # 移除可能的./前缀
-            file="${file#./}"
-            
-            # 验证文件
-            if validate_file "$file"; then
-              # 分类
-              if [[ "$file" =~ \.py$ ]]; then
-                VALID_CHANGED_PY+="$file"$'\n'
-              elif [[ "$file" =~ \.ipynb$ ]]; then
-                # 验证JSON格式
-                if jq -e . "$file" >/dev/null 2>&1; then
-                  VALID_CHANGED_IPYNB+="$file"$'\n'
+                echo "⚠️ API failed, falling back to git diff" >> "$ERROR_LOG"
+                # Fallback to git diff
+                if git rev-parse --verify HEAD^ >/dev/null 2>&1; then
+                  ALL_CHANGED_FILES=$(git diff --name-only HEAD^ HEAD --diff-filter=ACMRT)
                 else
-                  echo "INVALID_JSON: $file" >> "$ERROR_LOG"
+                  ALL_CHANGED_FILES=$(git ls-files)
                 fi
               fi
+              
+            else
+              # Push mode
+              echo "🔍 Push Mode: Getting changed files via git diff"
+              
+              # Check if this is first commit
+              if git rev-parse --verify HEAD^ >/dev/null 2>&1; then
+                ALL_CHANGED_FILES=$(git diff --name-only HEAD^ HEAD --diff-filter=ACMRT)
+              else
+                echo "⚠️ First commit detected, checking all files"
+                ALL_CHANGED_FILES=$(git ls-files)
+              fi
             fi
-          done <<< "$ALL_CHANGED_FILES"
+          fi
           
-          # 去除空行
-          VALID_CHANGED_PY=$(echo "$VALID_CHANGED_PY" | sed '/^$/d')
-          VALID_CHANGED_IPYNB=$(echo "$VALID_CHANGED_IPYNB" | sed '/^$/d')
-          
-          # 统计文件数量
-          PY_FILE_COUNT=$(echo "$VALID_CHANGED_PY" | wc -l | tr -d ' ')
-          IPYNB_FILE_COUNT=$(echo "$VALID_CHANGED_IPYNB" | wc -l | tr -d ' ')
-          
-          # 兜底：空值设为0
-          PY_FILE_COUNT=${PY_FILE_COUNT:-0}
-          IPYNB_FILE_COUNT=${IPYNB_FILE_COUNT:-0}
-          
-          # 生成安全的文件列表（处理特殊字符）
-          generate_safe_file_list() {
-            local file_list="$1"
-            local output_var="$2"
-            local list_file="$3"
+          # Process files with Python (best for Unicode handling)
+          if [ -n "$ALL_CHANGED_FILES" ]; then
+            # Save to temp file for Python processing
+            echo "$ALL_CHANGED_FILES" > "$TEMP_DIR/raw_files.txt"
             
-            if [ -n "$file_list" ]; then
-              # 写入文件列表（每行一个文件）
-              echo "$file_list" > "$list_file"
-              
-              # 生成shell安全的参数字符串
-              local args=""
-              while IFS= read -r file; do
-                [ -z "$file" ] && continue
-                # 使用printf %q进行转义
-                args+=" $(printf '%q' "$file")"
-              done <<< "$file_list"
-              args="${args# }"  # 移除开头的空格
-              
-              # 导出到环境变量
-              echo "$output_var=$args" >> "$GITHUB_ENV"
-              echo "${output_var}_LIST=$list_file" >> "$GITHUB_ENV"
+            # Use Python to process files (handles Unicode correctly)
+            python3 << 'EOF'
+import os
+import sys
+import json
+import base64
+from pathlib import Path
+
+# Setup
+temp_dir = os.environ.get('TEMP_DIR', '/tmp')
+valid_py = []
+valid_ipynb = []
+errors = []
+all_files = []
+
+# Read all files
+raw_file_path = os.path.join(temp_dir, 'raw_files.txt')
+if os.path.exists(raw_file_path):
+    with open(raw_file_path, 'r', encoding='utf-8') as f:
+        all_files = [line.strip() for line in f if line.strip()]
+
+print(f"Processing {len(all_files)} files...")
+
+for file_path in all_files:
+    # Clean path
+    file_path = file_path.strip().rstrip('\r')
+    if not file_path:
+        continue
+    
+    # Check if file exists (might have been deleted)
+    if not os.path.exists(file_path):
+        errors.append(f"File does not exist (deleted?): {file_path}")
+        continue
+    
+    # Check if file is empty
+    if os.path.getsize(file_path) == 0:
+        errors.append(f"Empty file skipped: {file_path}")
+        continue
+    
+    # Get file extension (case insensitive)
+    ext = Path(file_path).suffix.lower()
+    
+    if ext == '.py':
+        valid_py.append(file_path)
+    elif ext == '.ipynb':
+        # Validate notebook JSON
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                json.load(f)
+            valid_ipynb.append(file_path)
+        except json.JSONDecodeError as e:
+            errors.append(f"Invalid notebook JSON - {file_path}: {str(e)}")
+        except Exception as e:
+            errors.append(f"Error reading notebook - {file_path}: {str(e)}")
+    # Other file types are ignored
+
+# Save results
+py_file_path = os.path.join(temp_dir, 'valid_py.txt')
+ipynb_file_path = os.path.join(temp_dir, 'valid_ipynb.txt')
+error_file_path = os.path.join(temp_dir, 'errors.log')
+
+with open(py_file_path, 'w', encoding='utf-8') as f:
+    f.write('\n'.join(valid_py))
+
+with open(ipynb_file_path, 'w', encoding='utf-8') as f:
+    f.write('\n'.join(valid_ipynb))
+
+with open(error_file_path, 'w', encoding='utf-8') as f:
+    f.write('\n'.join(errors))
+
+# Also create JSON file with all info (for later steps)
+files_json = {
+    'py': valid_py,
+    'ipynb': valid_ipynb,
+    'errors': errors
+}
+
+json_path = os.path.join(temp_dir, 'files.json')
+with open(json_path, 'w', encoding='utf-8') as f:
+    json.dump(files_json, f, ensure_ascii=False, indent=2)
+
+# Print summary
+print(f"\nFound {len(valid_py)} Python files, {len(valid_ipynb)} notebook files")
+if errors:
+    print(f"Warnings/Errors: {len(errors)}")
+EOF
+          fi
+          
+          # Read results from Python
+          if [ -f "$TEMP_DIR/valid_py.txt" ]; then
+            VALID_CHANGED_PY=$(cat "$TEMP_DIR/valid_py.txt")
+          fi
+          
+          if [ -f "$TEMP_DIR/valid_ipynb.txt" ]; then
+            VALID_CHANGED_IPYNB=$(cat "$TEMP_DIR/valid_ipynb.txt")
+          fi
+          
+          if [ -f "$TEMP_DIR/errors.log" ] && [ -s "$TEMP_DIR/errors.log" ]; then
+            ERRORS=$(cat "$TEMP_DIR/errors.log")
+          fi
+          
+          # Save to GitHub environment using heredoc (safe for Unicode)
+          {
+            echo "VALID_CHANGED_PY<<EOF_PY"
+            echo "$VALID_CHANGED_PY"
+            echo "EOF_PY"
+            
+            echo "VALID_CHANGED_IPYNB<<EOF_IPYNB"
+            echo "$VALID_CHANGED_IPYNB"
+            echo "EOF_IPYNB"
+            
+            if [ -n "$ERRORS" ]; then
+              echo "FILE_DETECTION_ERRORS<<EOF_ERR"
+              echo "$ERRORS"
+              echo "EOF_ERR"
             fi
-          }
+          } >> "$GITHUB_ENV"
           
-          # 生成安全文件列表
-          PY_LIST_FILE="$TMP_DIR/py_files.txt"
-          IPYNB_LIST_FILE="$TMP_DIR/ipynb_files.txt"
+          # Count files
+          PY_FILE_COUNT=$(echo "$VALID_CHANGED_PY" | grep -c '^' || echo "0")
+          IPYNB_FILE_COUNT=$(echo "$VALID_CHANGED_IPYNB" | grep -c '^' || echo "0")
           
-          generate_safe_file_list "$VALID_CHANGED_PY" "PY_FILES_ARGS" "$PY_LIST_FILE"
-          generate_safe_file_list "$VALID_CHANGED_IPYNB" "IPYNB_FILES_ARGS" "$IPYNB_LIST_FILE"
-          
-          # 导出文件列表路径
-          echo "PY_FILES_LIST=$PY_LIST_FILE" >> "$GITHUB_ENV"
-          echo "IPYNB_FILES_LIST=$IPYNB_LIST_FILE" >> "$GITHUB_ENV"
-          
-          # 导出计数
           echo "PY_FILE_COUNT=$PY_FILE_COUNT" >> "$GITHUB_ENV"
           echo "IPYNB_FILE_COUNT=$IPYNB_FILE_COUNT" >> "$GITHUB_ENV"
           
-          # 导出错误日志
-          if [ -s "$ERROR_LOG" ]; then
-            echo "FILE_DETECTION_ERRORS<<EOF" >> "$GITHUB_ENV"
-            cat "$ERROR_LOG" >> "$GITHUB_ENV"
-            echo "EOF" >> "$GITHUB_ENV"
-          fi
+          # Create a JSON file for later steps (safe for Unicode)
+          mkdir -p .ci-cache
+          cp "$TEMP_DIR/files.json" .ci-cache/pylint-files.json 2>/dev/null || echo '{"py":[],"ipynb":[]}' > .ci-cache/pylint-files.json
           
-          # 打印结果
+          # Print summary
           echo "======================================"
           echo "===== Changed Files Summary ====="
-          echo "✅ Valid .py files: $PY_FILE_COUNT"
-          [ -n "$VALID_CHANGED_PY" ] && echo "$VALID_CHANGED_PY" | while IFS= read -r f; do echo "  - $f"; done
+          echo "✅ Changed .py files (to lint):"
+          if [ -z "$VALID_CHANGED_PY" ]; then
+            echo "  - None"
+          else
+            echo "$VALID_CHANGED_PY" | while IFS= read -r f; do 
+              if [ -n "$f" ]; then
+                echo "  - $f"
+              fi
+            done
+          fi
           
-          echo "✅ Valid .ipynb files: $IPYNB_FILE_COUNT"
-          [ -n "$VALID_CHANGED_IPYNB" ] && echo "$VALID_CHANGED_IPYNB" | while IFS= read -r f; do echo "  - $f"; done
+          echo "✅ Changed .ipynb files (to lint):"
+          if [ -z "$VALID_CHANGED_IPYNB" ]; then
+            echo "  - None"
+          else
+            echo "$VALID_CHANGED_IPYNB" | while IFS= read -r f; do 
+              if [ -n "$f" ]; then
+                echo "  - $f"
+              fi
+            done
+          fi
           
-          if [ -s "$ERROR_LOG" ]; then
-            echo "⚠️ Skipped files:"
-            cat "$ERROR_LOG" | while IFS= read -r line; do echo "  - $line"; done
+          if [ -n "$ERRORS" ]; then
+            echo "⚠️ Warnings/Errors:"
+            echo "$ERRORS" | while IFS= read -r line; do
+              if [ -n "$line" ]; then
+                echo "  - $line"
+              fi
+            done
           fi
           echo "======================================"
+          
+          # Cleanup
+          rm -rf "$TEMP_DIR"
         shell: bash
 
-      # ==================== 改进的Pylint执行 ====================
-      - name: Run Pylint for .py files (Enhanced)
+      - name: Debug - Show File List
+        if: ${{ github.event.inputs.debug_enabled == 'true' }}
+        run: |
+          echo "🔍 File List Debug Info:"
+          echo "PY_FILE_COUNT: ${{ env.PY_FILE_COUNT }}"
+          echo "IPYNB_FILE_COUNT: ${{ env.IPYNB_FILE_COUNT }}"
+          
+          if [ -f ".ci-cache/pylint-files.json" ]; then
+            echo "Files JSON content:"
+            cat .ci-cache/pylint-files.json
+          fi
+          
+          if [ -n "${{ env.FILE_DETECTION_ERRORS }}" ]; then
+            echo "File Detection Errors:"
+            echo "${{ env.FILE_DETECTION_ERRORS }}"
+          fi
+        shell: bash
+
+      - name: Run Pylint for .py files
         if: ${{ env.PY_FILE_COUNT > 0 }}
         run: |
-          NUM_CORES=$(nproc)
-          CHUNK_SIZE=50  # 每批处理50个文件
+          set -euo pipefail
           
-          echo "🔧 Running Pylint on ${{ env.PY_FILE_COUNT }} .py files..."
+          # Create results directory
+          mkdir -p pylint_results
           
-          # 从文件读取文件列表
-          if [ -f "${{ env.PY_FILES_LIST }}" ]; then
-            # 分批处理大量文件
-            BATCH_NUM=1
-            TOTAL_FILES=${{ env.PY_FILE_COUNT }}
-            PROCESSED=0
-            FAILED_BATCHES=0
-            
-            while [ $PROCESSED -lt $TOTAL_FILES ]; do
-              # 计算当前批次的文件
-              BATCH_FILES=$(tail -n +$((PROCESSED + 1)) "${{ env.PY_FILES_LIST }}" | head -n $CHUNK_SIZE)
-              BATCH_COUNT=$(echo "$BATCH_FILES" | wc -l | tr -d ' ')
-              
-              echo -e "\n📦 Processing batch $BATCH_NUM ($BATCH_COUNT files)..."
-              
-              # 创建临时文件列表
-              BATCH_LIST="pylint_batch_${BATCH_NUM}.txt"
-              echo "$BATCH_FILES" > "$BATCH_LIST"
-              
-              # 执行Pylint
-              set +e
-              pylint --rcfile=.github/pylint.conf \
-                     --jobs=$NUM_CORES \
-                     --output-format=colorized \
-                     $(cat "$BATCH_LIST") 2>&1 | tee -a pylint_py_logs.txt
-              
-              PYLINT_EXIT_CODE=${PIPESTATUS[0]}
-              set -e
-              
-              if [ $PYLINT_EXIT_CODE -ne 0 ]; then
-                echo "⚠️ Batch $BATCH_NUM failed with exit code $PYLINT_EXIT_CODE"
-                FAILED_BATCHES=$((FAILED_BATCHES + 1))
-                # 记录失败的批次
-                echo "FAILED_BATCH: $BATCH_NUM" >> pylint_failed_batches.log
-              fi
-              
-              PROCESSED=$((PROCESSED + BATCH_COUNT))
-              BATCH_NUM=$((BATCH_NUM + 1))
-              rm -f "$BATCH_LIST"
-            done
-            
-            # 最终退出码：如果有任何批次失败，返回非0
-            if [ $FAILED_BATCHES -gt 0 ]; then
-              echo "❌ $FAILED_BATCHES batches failed"
-              FINAL_EXIT_CODE=1
-            else
-              echo "✅ All batches passed"
-              FINAL_EXIT_CODE=0
-            fi
-            
-            echo "$FINAL_EXIT_CODE" > pylint_py_exit_code.txt
-          else
-            echo "⚠️ File list not found, skipping"
-            echo "0" > pylint_py_exit_code.txt
-          fi
+          # Read files from JSON (Unicode safe)
+          python3 << 'EOF'
+import json
+import subprocess
+import sys
+import multiprocessing
+import os
+from pathlib import Path
+
+# Load file list
+with open('.ci-cache/pylint-files.json', 'r', encoding='utf-8') as f:
+    files_data = json.load(f)
+
+py_files = files_data.get('py', [])
+if not py_files:
+    print("No Python files to lint")
+    sys.exit(0)
+
+print(f"🔧 Running Pylint on {len(py_files)} modified .py files...")
+print("Files to lint:")
+for f in py_files:
+    print(f"  - {f}")
+
+# Create a temporary file with file list (for pylint)
+list_file = 'pylint_files.txt'
+with open(list_file, 'w', encoding='utf-8') as f:
+    for file in py_files:
+        f.write(f"{file}\n")
+
+# Run pylint
+num_cores = multiprocessing.cpu_count()
+cmd = ['pylint', f'--jobs={num_cores}', '--rcfile=.github/pylint.conf']
+
+# Add files from list file (handles special characters better)
+with open(list_file, 'r', encoding='utf-8') as f:
+    for line in f:
+        file = line.strip()
+        if file:
+            cmd.append(file)
+
+try:
+    # Run and capture output
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    output = result.stdout + result.stderr
+    
+    # Save output
+    with open('pylint_results/pylint_py_logs.txt', 'w', encoding='utf-8') as f:
+        f.write(output)
+    
+    # Print output (with Unicode support)
+    print(output)
+    
+    # Parse results
+    error_count = output.count('E:') + output.count('F:')
+    warning_count = output.count('W:')
+    convention_count = output.count('C:')
+    refactor_count = output.count('R:')
+    
+    print(f"\n📊 Pylint Statistics:")
+    print(f"  Errors: {error_count}")
+    print(f"  Warnings: {warning_count}")
+    print(f"  Conventions: {convention_count}")
+    print(f"  Refactors: {refactor_count}")
+    
+    # Save exit code and stats
+    with open('pylint_results/pylint_py_exit_code.txt', 'w') as f:
+        f.write(str(result.returncode))
+    
+    with open('pylint_results/pylint_py_stats.txt', 'w') as f:
+        f.write(f"ERROR_COUNT={error_count}\n")
+        f.write(f"WARNING_COUNT={warning_count}\n")
+        f.write(f"CONVENTION_COUNT={convention_count}\n")
+        f.write(f"REFACTOR_COUNT={refactor_count}\n")
+    
+    if result.returncode == 0:
+        print("✅ .py files Pylint check passed")
+    else:
+        print(f"❌ .py files Pylint check failed (exit code: {result.returncode})")
+        
+    # Cleanup
+    os.remove(list_file)
+    
+except Exception as e:
+    print(f"Error running pylint: {e}")
+    with open('pylint_results/pylint_py_exit_code.txt', 'w') as f:
+        f.write("1")
+    sys.exit(1)
+EOF
         shell: bash
         continue-on-error: true
 
-      # ==================== 改进的nbqa执行 ====================
-      - name: Run Pylint for .ipynb files (via nbqa with enhanced error handling)
-        if: ${{ env.IPYNB_FILE_COUNT > 0 }}
-        run: |
-          NUM_CORES=$(nproc)
-          echo "🔧 Running Pylint on ${{ env.IPYNB_FILE_COUNT }} .ipynb files..."
-          
-          # 创建日志文件
-          NBQA_OUTPUT="nbqa_output.log"
-          NBQA_ERROR="nbqa_error.log"
-          PYLINT_RESULTS="pylint_ipynb_results.log"
-          
-          # 从文件读取文件列表
-          if [ -f "${{ env.IPYNB_FILES_LIST }}" ]; then
-            # 逐文件处理以便更好的错误隔离
-            FAILED_FILES=0
-            
-            while IFS= read -r notebook; do
-              [ -z "$notebook" ] && continue
-              
-              echo -e "\n📓 Checking: $notebook"
-              
-              # 为每个notebook创建临时文件
-              TMP_NBQA_OUT=$(mktemp)
-              TMP_NBQA_ERR=$(mktemp)
-              
-              set +e
-              # 运行nbqa并捕获所有输出
-              nbqa pylint "$notebook" \
-                --jobs=$NUM_CORES \
-                --rcfile=.github/pylint.conf \
-                2> >(tee "$TMP_NBQA_ERR" >&2) \
-                | tee "$TMP_NBQA_OUT"
-              
-              NBQA_EXIT_CODE=${PIPESTATUS[0]}
-              set -e
-              
-              # 增强的退出码分析
-              {
-                echo "=== $notebook ==="
-                echo "nbqa exit code: $NBQA_EXIT_CODE"
-                
-                # 分析nbqa输出
-                if [ -s "$TMP_NBQA_OUT" ]; then
-                  if grep -q "Your code has been rated at" "$TMP_NBQA_OUT"; then
-                    RATING=$(grep "Your code has been rated at" "$TMP_NBQA_OUT" | grep -oP '[0-9.]+/10')
-                    echo "pylint rating: $RATING"
-                  fi
-                  
-                  # 检查是否有pylint错误
-                  if grep -q "^[^:]*:[0-9]*:[0-9]*: [CEF]" "$TMP_NBQA_OUT"; then
-                    echo "pylint_errors: true"
-                    cat "$TMP_NBQA_OUT" >> "$PYLINT_RESULTS"
-                  fi
-                fi
-                
-                # 检查nbqa自身错误
-                if [ -s "$TMP_NBQA_ERR" ]; then
-                  if grep -q "ModuleNotFoundError" "$TMP_NBQA_ERR"; then
-                    echo "nbqa_error: missing_dependency"
-                  elif grep -q "SyntaxError" "$TMP_NBQA_ERR"; then
-                    echo "nbqa_error: syntax_error"
-                  else
-                    echo "nbqa_error: other"
-                  fi
-                  cat "$TMP_NBQA_ERR" >> "$NBQA_ERROR"
-                fi
-                
-                echo "---"
-              } >> "$NBQA_OUTPUT"
-              
-              # 判断是否失败
-              if [ $NBQA_EXIT_CODE -ne 0 ]; then
-                # 检查是否真的是pylint错误
-                if [ -s "$TMP_NBQA_OUT" ] && grep -q "^[^:]*:[0-9]*:[0-9]*: [CEF]" "$TMP_NBQA_OUT"; then
-                  echo "❌ Pylint found issues in $notebook"
-                  FAILED_FILES=$((FAILED_FILES + 1))
-                elif [ -s "$TMP_NBQA_ERR" ]; then
-                  echo "⚠️ nbqa encountered an error processing $notebook"
-                  # nbqa错误不计数为失败，但记录
-                fi
-              fi
-              
-              rm -f "$TMP_NBQA_OUT" "$TMP_NBQA_ERR"
-            done < "${{ env.IPYNB_FILES_LIST }}"
-            
-            # 生成汇总报告
-            {
-              echo "======================================"
-              echo "nbQA Pylint Summary"
-              echo "======================================"
-              echo "Total notebooks: ${{ env.IPYNB_FILE_COUNT }}"
-              echo "Failed notebooks: $FAILED_FILES"
-              echo ""
-              echo "Detailed results in $PYLINT_RESULTS"
-              echo "nbQA errors in $NBQA_ERROR"
-            } >> "$NBQA_OUTPUT"
-            
-            # 保存最终状态
-            if [ $FAILED_FILES -gt 0 ]; then
-              echo "❌ $FAILED_FILES notebooks have pylint issues"
-              echo "1" > pylint_ipynb_exit_code.txt
-            else
-              echo "✅ All notebooks passed pylint check"
-              echo "0" > pylint_ipynb_exit_code.txt
-            fi
-            
-            # 上传日志作为artifact
-            if [ -s "$PYLINT_RESULTS" ] || [ -s "$NBQA_ERROR" ]; then
-              echo "📤 Uploading logs..."
-              # 这里可以添加上传artifact的步骤
-            fi
-          else
-            echo "⚠️ File list not found, skipping"
-            echo "0" > pylint_ipynb_exit_code.txt
-          fi
-        shell: bash
-        continue-on-error: true
-
-      # ==================== 状态设置步骤 ====================
       - name: Set Pylint .py Status
         if: ${{ env.PY_FILE_COUNT > 0 }}
         run: |
-          if [ -f pylint_py_exit_code.txt ] && [ "$(cat pylint_py_exit_code.txt)" = "0" ]; then
+          if [ -f pylint_results/pylint_py_exit_code.txt ] && [ "$(cat pylint_results/pylint_py_exit_code.txt)" = "0" ]; then
             echo "PYLINT_PY_STATUS=success" >> "$GITHUB_ENV"
+            echo "PYLINT_PY_ERRORS=0" >> "$GITHUB_ENV"
           else
             echo "PYLINT_PY_STATUS=failed" >> "$GITHUB_ENV"
+            if [ -f pylint_results/pylint_py_stats.txt ]; then
+              source pylint_results/pylint_py_stats.txt
+              echo "PYLINT_PY_ERRORS=$ERROR_COUNT" >> "$GITHUB_ENV"
+            else
+              echo "PYLINT_PY_ERRORS=unknown" >> "$GITHUB_ENV"
+            fi
           fi
         shell: bash
 
@@ -512,14 +536,139 @@ jobs:
         run: |
           echo "✅ No modified .py files found, skipping Pylint for .py"
           echo "PYLINT_PY_STATUS=skipped" >> "$GITHUB_ENV"
+          echo "PYLINT_PY_ERRORS=0" >> "$GITHUB_ENV"
+
+      - name: Run Pylint for .ipynb files (via nbqa)
+        if: ${{ env.IPYNB_FILE_COUNT > 0 }}
+        run: |
+          set -euo pipefail
+          
+          # Create results directory
+          mkdir -p pylint_results
+          
+          # Read files from JSON (Unicode safe)
+          python3 << 'EOF'
+import json
+import subprocess
+import sys
+import multiprocessing
+import os
+from pathlib import Path
+
+# Load file list
+with open('.ci-cache/pylint-files.json', 'r', encoding='utf-8') as f:
+    files_data = json.load(f)
+
+ipynb_files = files_data.get('ipynb', [])
+if not ipynb_files:
+    print("No notebook files to lint")
+    sys.exit(0)
+
+print(f"🔧 Running Pylint on {len(ipynb_files)} modified .ipynb files...")
+print("Files to lint:")
+valid_files = []
+invalid_files = []
+
+# Validate each notebook
+for file in ipynb_files:
+    print(f"  - {file}")
+    try:
+        with open(file, 'r', encoding='utf-8') as f:
+            json.load(f)
+        valid_files.append(file)
+    except Exception as e:
+        print(f"    ⚠️ Invalid notebook: {e}")
+        invalid_files.append(file)
+
+# Save invalid files list
+if invalid_files:
+    with open('pylint_results/invalid_notebooks.txt', 'w', encoding='utf-8') as f:
+        for file in invalid_files:
+            f.write(f"{file}\n")
+
+if not valid_files:
+    print("❌ No valid notebook files to lint")
+    with open('pylint_results/pylint_ipynb_exit_code.txt', 'w') as f:
+        f.write("255")
+    sys.exit(0)
+
+# Create file list for nbqa
+list_file = 'nbqa_files.txt'
+with open(list_file, 'w', encoding='utf-8') as f:
+    for file in valid_files:
+        f.write(f"{file}\n")
+
+# Run nbqa pylint
+num_cores = multiprocessing.cpu_count()
+cmd = ['nbqa', 'pylint', f'--jobs={num_cores}', '--rcfile=.github/pylint.conf']
+
+# Add files from list
+with open(list_file, 'r', encoding='utf-8') as f:
+    for line in f:
+        file = line.strip()
+        if file:
+            cmd.append(file)
+
+try:
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    output = result.stdout + result.stderr
+    
+    # Save output
+    with open('pylint_results/pylint_ipynb_logs.txt', 'w', encoding='utf-8') as f:
+        f.write(output)
+    
+    # Print output
+    print(output)
+    
+    # Parse results
+    error_count = output.count('E:') + output.count('F:')
+    warning_count = output.count('W:')
+    
+    print(f"\n📊 nbqa Pylint Statistics:")
+    print(f"  Errors: {error_count}")
+    print(f"  Warnings: {warning_count}")
+    
+    # Save exit code and stats
+    with open('pylint_results/pylint_ipynb_exit_code.txt', 'w') as f:
+        f.write(str(result.returncode))
+    
+    with open('pylint_results/pylint_ipynb_stats.txt', 'w') as f:
+        f.write(f"ERROR_COUNT={error_count}\n")
+        f.write(f"WARNING_COUNT={warning_count}\n")
+        f.write(f"INVALID_COUNT={len(invalid_files)}\n")
+    
+    if result.returncode == 0:
+        print("✅ .ipynb files Pylint check passed")
+    else:
+        print(f"❌ .ipynb files Pylint check failed (exit code: {result.returncode})")
+    
+    # Cleanup
+    os.remove(list_file)
+    
+except Exception as e:
+    print(f"Error running nbqa pylint: {e}")
+    with open('pylint_results/pylint_ipynb_exit_code.txt', 'w') as f:
+        f.write("1")
+    sys.exit(1)
+EOF
+        shell: bash
+        continue-on-error: true
 
       - name: Set Pylint .ipynb Status
         if: ${{ env.IPYNB_FILE_COUNT > 0 }}
         run: |
-          if [ -f pylint_ipynb_exit_code.txt ] && [ "$(cat pylint_ipynb_exit_code.txt)" = "0" ]; then
+          if [ -f pylint_results/pylint_ipynb_exit_code.txt ] && [ "$(cat pylint_results/pylint_ipynb_exit_code.txt)" = "0" ]; then
             echo "PYLINT_IPYNB_STATUS=success" >> "$GITHUB_ENV"
+            echo "PYLINT_IPYNB_ERRORS=0" >> "$GITHUB_ENV"
           else
             echo "PYLINT_IPYNB_STATUS=failed" >> "$GITHUB_ENV"
+            if [ -f pylint_results/pylint_ipynb_stats.txt ]; then
+              source pylint_results/pylint_ipynb_stats.txt
+              echo "PYLINT_IPYNB_ERRORS=$ERROR_COUNT" >> "$GITHUB_ENV"
+              echo "PYLINT_IPYNB_INVALID=$INVALID_COUNT" >> "$GITHUB_ENV"
+            else
+              echo "PYLINT_IPYNB_ERRORS=unknown" >> "$GITHUB_ENV"
+            fi
           fi
         shell: bash
 
@@ -528,439 +677,645 @@ jobs:
         run: |
           echo "✅ No modified .ipynb files found, skipping Pylint for .ipynb"
           echo "PYLINT_IPYNB_STATUS=skipped" >> "$GITHUB_ENV"
+          echo "PYLINT_IPYNB_ERRORS=0" >> "$GITHUB_ENV"
 
-      # ==================== 改进的总结步骤 ====================
       - name: Summarize Pylint Check Results
         run: |
+          echo "======================================"
           echo "===== Pylint Check Summary ====="
-          echo ".py files status: ${{ env.PYLINT_PY_STATUS }}"
-          echo ".ipynb files status: ${{ env.PYLINT_IPYNB_STATUS }}"
-          
-          # 显示文件检测错误
-          if [ -n "${{ env.FILE_DETECTION_ERRORS }}" ]; then
-            echo ""
-            echo "⚠️ File detection warnings:"
-            echo "${{ env.FILE_DETECTION_ERRORS }}"
+          echo "📊 Python files: ${{ env.PY_FILE_COUNT }} | Status: ${{ env.PYLINT_PY_STATUS }}"
+          if [ "${{ env.PYLINT_PY_ERRORS }}" != "0" ] && [ -n "${{ env.PYLINT_PY_ERRORS }}" ]; then
+            echo "  Errors: ${{ env.PYLINT_PY_ERRORS }}"
           fi
           
-          echo "================================="
+          echo "📓 Notebook files: ${{ env.IPYNB_FILE_COUNT }} | Status: ${{ env.PYLINT_IPYNB_STATUS }}"
+          if [ "${{ env.PYLINT_IPYNB_ERRORS }}" != "0" ] && [ -n "${{ env.PYLINT_IPYNB_ERRORS }}" ]; then
+            echo "  Errors: ${{ env.PYLINT_IPYNB_ERRORS }}"
+          fi
+          if [ "${{ env.PYLINT_IPYNB_INVALID }}" != "0" ] && [ -n "${{ env.PYLINT_IPYNB_INVALID }}" ]; then
+            echo "  Invalid notebooks skipped: ${{ env.PYLINT_IPYNB_INVALID }}"
+          fi
           
-          # 检查失败状态
-          FAILED=false
+          # Show file detection errors
+          if [ -n "${{ env.FILE_DETECTION_ERRORS }}" ]; then
+            echo -e "\n⚠️ File Detection Warnings:"
+            echo "${{ env.FILE_DETECTION_ERRORS }}" | head -5
+            ERROR_COUNT=$(echo "${{ env.FILE_DETECTION_ERRORS }}" | grep -c '^' || echo "0")
+            if [ $ERROR_COUNT -gt 5 ]; then
+              echo "  ... and $(($ERROR_COUNT - 5)) more warnings"
+            fi
+          fi
+          
+          echo "======================================"
+          
+          # Determine final status
+          FINAL_EXIT_CODE=0
           
           if [ "${{ env.PYLINT_PY_STATUS }}" = "failed" ]; then
-            echo "❌ .py files failed Pylint check. Please check the 'Run Pylint for .py files' step above for detailed errors."
-            FAILED=true
+            echo "❌ .py files failed Pylint check"
+            FINAL_EXIT_CODE=1
           fi
           
           if [ "${{ env.PYLINT_IPYNB_STATUS }}" = "failed" ]; then
-            echo "❌ .ipynb files failed Pylint check. Please check the 'Run Pylint for .ipynb files' step above for detailed errors."
-            fi
-            FAILED=true
+            echo "❌ .ipynb files failed Pylint check"
+            FINAL_EXIT_CODE=1
           fi
           
-          if [ "$FAILED" = "true" ]; then
-            echo ""
-            echo "❌ Pylint check failed. Please fix the errors above."
-            exit 1
-          else
+          if [ $FINAL_EXIT_CODE -eq 0 ]; then
             echo "✅ All Pylint checks passed!"
+          else
+            echo "❌ Pylint check failed. Fix the errors and try again."
+            exit 1
           fi
         shell: bash
+
+      - name: Upload Pylint Results
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: pylint-results
+          path: |
+            pylint_results/
+            .ci-cache/pylint-files.json
+          retention-days: 7
 
   markdownlint-check:
     name: Markdownlint Check
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 10
     permissions:
       contents: read
       pull-requests: write
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.ref }}-markdown
+      cancel-in-progress: true
 
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
-
-      # ==================== 改进的Markdown文件检测 ====================
-      - name: Get Changed Markdown and Notebook Files (Enhanced)
-        id: get_changed_files
+          
+      - name: Setup Environment for Unicode
+        run: |
+          # Configure git for Unicode filenames
+          git config --global core.quotepath false
+          git config --global core.precomposeunicode true
+          
+          # Install jq
+          sudo apt update && sudo apt install jq -y
+        shell: bash
+          
+      - name: Get PR changed .ipynb and .md files
+        id: get_pr_changed_files
         run: |
           set -euo pipefail
           
-          # 初始化变量
-          VALID_CHANGED_IPYNB=""
-          VALID_CHANGED_MD=""
-          ERROR_LOG="md_detection_errors.log"
+          TEMP_DIR=$(mktemp -d)
+          VALID_IPYNB_FILE="$TEMP_DIR/valid_ipynb.txt"
+          VALID_MD_FILE="$TEMP_DIR/valid_md.txt"
+          ERROR_LOG="$TEMP_DIR/errors.log"
           
-          # 创建临时目录
-          TMP_DIR=$(mktemp -d)
-          trap "rm -rf $TMP_DIR" EXIT
+          > "$VALID_IPYNB_FILE"
+          > "$VALID_MD_FILE"
+          > "$ERROR_LOG"
           
-          # 获取改动文件（复用之前的逻辑）
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            # PR场景
-            if [ -n "${{ github.event.pull_request.base.sha }}" ] && [ -n "${{ github.event.pull_request.head.sha }}" ]; then
-              ALL_CHANGED_FILES=$(git diff --name-only "${{ github.event.pull_request.base.sha }}" "${{ github.event.pull_request.head.sha }}" --diff-filter=ACMRT 2>/dev/null || echo "")
+          # Determine changed files
+          FORCE_ALL="${{ github.event.inputs.force_check_all == 'true' }}"
+          
+          if [ "$FORCE_ALL" = "true" ]; then
+            echo "🔧 Force check all files enabled"
+            ALL_CHANGED_FILES=$(git ls-files)
+          elif [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "🔍 PR Mode: Getting changed files via GitHub API"
+            
+            # API call with pagination
+            PAGE=1
+            TEMP_JSON="$TEMP_DIR/api_response.json"
+            
+            while true; do
+              if ! curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+                     -H "Accept: application/vnd.github+json" \
+                     "https://api.github.com/repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files?per_page=100&page=$PAGE" \
+                     -o "$TEMP_JSON"; then
+                echo "❌ Failed to fetch page $PAGE" >> "$ERROR_LOG"
+                break
+              fi
+              
+              if ! jq empty "$TEMP_JSON" 2>/dev/null; then
+                echo "❌ Invalid JSON response" >> "$ERROR_LOG"
+                break
+              fi
+              
+              # Extract filenames (not removed)
+              jq -r '.[] | select(.status != "removed") | .filename' "$TEMP_JSON" >> "$TEMP_DIR/all_files.txt"
+              
+              # Check if this is the last page
+              FILE_COUNT=$(jq length "$TEMP_JSON")
+              if [ "$FILE_COUNT" -lt 100 ]; then
+                break
+              fi
+              
+              PAGE=$((PAGE + 1))
+            done
+            
+            if [ -f "$TEMP_DIR/all_files.txt" ]; then
+              ALL_CHANGED_FILES=$(cat "$TEMP_DIR/all_files.txt")
             fi
           else
-            # Push场景
+            echo "🔍 Push Mode: Getting changed files via git diff"
             if git rev-parse --verify HEAD^ >/dev/null 2>&1; then
-              ALL_CHANGED_FILES=$(git diff --name-only HEAD^ HEAD --diff-filter=ACMRT 2>/dev/null || echo "")
+              ALL_CHANGED_FILES=$(git diff --name-only HEAD^ HEAD --diff-filter=ACMRT)
             else
-              # 首次提交
-              ALL_CHANGED_FILES=$(git show --name-only --format=format:'' HEAD 2>/dev/null | grep -v '^$' || echo "")
+              ALL_CHANGED_FILES=$(git ls-files)
             fi
           fi
           
-          # 文件验证函数
-          validate_file() {
-            local file="$1"
+          # Process files with Python for Unicode support
+          if [ -n "$ALL_CHANGED_FILES" ]; then
+            echo "$ALL_CHANGED_FILES" > "$TEMP_DIR/raw_files.txt"
             
-            if [ ! -f "$file" ] || [ ! -r "$file" ]; then
-              return 1
+            python3 << 'EOF'
+import os
+import json
+from pathlib import Path
+
+temp_dir = os.environ.get('TEMP_DIR', '/tmp')
+valid_ipynb = []
+valid_md = []
+errors = []
+
+raw_file_path = os.path.join(temp_dir, 'raw_files.txt')
+if os.path.exists(raw_file_path):
+    with open(raw_file_path, 'r', encoding='utf-8') as f:
+        for line in f:
+            file_path = line.strip().rstrip('\r')
+            if not file_path:
+                continue
+            
+            # Check if file exists and not empty
+            if not os.path.exists(file_path):
+                errors.append(f"File does not exist: {file_path}")
+                continue
+            
+            if os.path.getsize(file_path) == 0:
+                errors.append(f"Empty file skipped: {file_path}")
+                continue
+            
+            ext = Path(file_path).suffix.lower()
+            
+            if ext == '.ipynb':
+                # Validate notebook JSON
+                try:
+                    with open(file_path, 'r', encoding='utf-8') as f:
+                        json.load(f)
+                    valid_ipynb.append(file_path)
+                except Exception as e:
+                    errors.append(f"Invalid notebook {file_path}: {str(e)}")
+            elif ext == '.md':
+                valid_md.append(file_path)
+
+# Save results
+with open(os.path.join(temp_dir, 'valid_ipynb.txt'), 'w', encoding='utf-8') as f:
+    f.write('\n'.join(valid_ipynb))
+
+with open(os.path.join(temp_dir, 'valid_md.txt'), 'w', encoding='utf-8') as f:
+    f.write('\n'.join(valid_md))
+
+with open(os.path.join(temp_dir, 'errors.log'), 'w', encoding='utf-8') as f:
+    f.write('\n'.join(errors))
+
+# Create JSON file
+files_json = {
+    'ipynb': valid_ipynb,
+    'md': valid_md,
+    'errors': errors
+}
+
+with open(os.path.join(temp_dir, 'markdown-files.json'), 'w', encoding='utf-8') as f:
+    json.dump(files_json, f, ensure_ascii=False, indent=2)
+
+print(f"Found {len(valid_ipynb)} notebooks, {len(valid_md)} markdown files")
+EOF
+          fi
+          
+          # Read results
+          VALID_CHANGED_IPYNB=$(cat "$VALID_IPYNB_FILE" 2>/dev/null || true)
+          VALID_CHANGED_MD=$(cat "$VALID_MD_FILE" 2>/dev/null || true)
+          ERRORS=$(cat "$ERROR_LOG" 2>/dev/null || true)
+          
+          # Save to environment
+          {
+            echo "VALID_CHANGED_IPYNB<<EOF_IPYNB"
+            echo "$VALID_CHANGED_IPYNB"
+            echo "EOF_IPYNB"
+            
+            echo "VALID_CHANGED_MD<<EOF_MD"
+            echo "$VALID_CHANGED_MD"
+            echo "EOF_MD"
+            
+            if [ -n "$ERRORS" ]; then
+              echo "MD_DETECTION_ERRORS<<EOF_ERR"
+              echo "$ERRORS"
+              echo "EOF_ERR"
             fi
-            
-            # 检查文件编码（对于MD文件）
-            if [[ "$file" =~ \.md$ ]]; then
-              if file "$file" | grep -q "XML document"; then
-                # 可能是ipynb文件误判
-                return 1
-              fi
-            fi
-            
-            return 0
-          }
+          } >> "$GITHUB_ENV"
           
-          # 分类筛选
-          while IFS= read -r file; do
-            [ -z "$file" ] && continue
-            file="${file#./}"
-            
-            if validate_file "$file"; then
-              if [[ "$file" =~ \.ipynb$ ]]; then
-                # 验证JSON
-                if jq -e . "$file" >/dev/null 2>&1; then
-                  VALID_CHANGED_IPYNB+="$file"$'\n'
-                else
-                  echo "INVALID_JSON: $file" >> "$ERROR_LOG"
-                fi
-              elif [[ "$file" =~ \.md$ ]]; then
-                VALID_CHANGED_MD+="$file"$'\n'
-              fi
-            else
-              echo "INVALID_FILE: $file" >> "$ERROR_LOG"
-            fi
-          done <<< "$ALL_CHANGED_FILES"
+          # Save JSON for later steps
+          mkdir -p .ci-cache
+          cp "$TEMP_DIR/markdown-files.json" .ci-cache/markdown-files.json 2>/dev/null || echo '{"ipynb":[],"md":[]}' > .ci-cache/markdown-files.json
           
-          # 去除空行
-          VALID_CHANGED_IPYNB=$(echo "$VALID_CHANGED_IPYNB" | sed '/^$/d')
-          VALID_CHANGED_MD=$(echo "$VALID_CHANGED_MD" | sed '/^$/d')
-          
-          # 统计数量
-          IPYNB_COUNT=$(echo "$VALID_CHANGED_IPYNB" | wc -l | tr -d ' ')
-          MD_COUNT=$(echo "$VALID_CHANGED_MD" | wc -l | tr -d ' ')
-          
-          IPYNB_COUNT=${IPYNB_COUNT:-0}
-          MD_COUNT=${MD_COUNT:-0}
-          
-          # 导出环境变量
-          echo "VALID_CHANGED_IPYNB<<EOF" >> "$GITHUB_ENV"
-          echo "$VALID_CHANGED_IPYNB" >> "$GITHUB_ENV"
-          echo "EOF" >> "$GITHUB_ENV"
-          
-          echo "VALID_CHANGED_MD<<EOF" >> "$GITHUB_ENV"
-          echo "$VALID_CHANGED_MD" >> "$GITHUB_ENV"
-          echo "EOF" >> "$GITHUB_ENV"
-          
-          echo "IPYNB_COUNT=$IPYNB_COUNT" >> "$GITHUB_ENV"
-          echo "MD_COUNT=$MD_COUNT" >> "$GITHUB_ENV"
-          
-          # 打印结果
+          # Print summary
           echo "======================================"
-          echo "===== Changed Files Summary ====="
-          echo "✅ .ipynb files: $IPYNB_COUNT"
-          [ -n "$VALID_CHANGED_IPYNB" ] && echo "$VALID_CHANGED_IPYNB" | while IFS= read -r f; do echo "  - $f"; done
+          echo "===== Markdown Files Summary ====="
+          echo "✅ Changed .ipynb files (to extract):"
+          if [ -z "$VALID_CHANGED_IPYNB" ]; then
+            echo "  - None"
+          else
+            echo "$VALID_CHANGED_IPYNB" | while IFS= read -r f; do
+              if [ -n "$f" ]; then
+                echo "  - $f"
+              fi
+            done
+          fi
           
-          echo "✅ .md files: $MD_COUNT"
-          [ -n "$VALID_CHANGED_MD" ] && echo "$VALID_CHANGED_MD" | while IFS= read -r f; do echo "  - $f"; done
+          echo "✅ Changed .md files (to lint directly):"
+          if [ -z "$VALID_CHANGED_MD" ]; then
+            echo "  - None"
+          else
+            echo "$VALID_CHANGED_MD" | while IFS= read -r f; do
+              if [ -n "$f" ]; then
+                echo "  - $f"
+              fi
+            done
+          fi
           
-          if [ -s "$ERROR_LOG" ]; then
-            echo "⚠️ Skipped files:"
-            cat "$ERROR_LOG" | while IFS= read -r line; do echo "  - $line"; done
+          if [ -n "$ERRORS" ]; then
+            echo "⚠️ Warnings:"
+            echo "$ERRORS" | while IFS= read -r line; do
+              if [ -n "$line" ]; then
+                echo "  - $line"
+              fi
+            done
           fi
           echo "======================================"
+          
+          rm -rf "$TEMP_DIR"
         shell: bash
 
-      # ==================== 改进的Markdown提取 ====================
-      - name: Extract Markdown from Notebooks (Enhanced)
+      - name: Extract Markdown from PR changed .ipynb files
         id: extract_md
         run: |
           set -euo pipefail
           
           export LC_ALL=en_US.UTF-8
           export LANG=en_US.UTF-8
-          
-          # 配置
+
           TARGET_DIR="./temp_md"
           MAP_FILE="./md_ipynb_mapping.log"
           ERROR_LOG="./extract_error.log"
-          STATS_FILE="./extract_stats.log"
           
           echo "TARGET_DIR=$TARGET_DIR" >> "$GITHUB_ENV"
           echo "MAP_FILE=$MAP_FILE" >> "$GITHUB_ENV"
-          
-          # 初始化
+
+          # Initialize
           mkdir -p "$TARGET_DIR"
           rm -rf "$TARGET_DIR"/* 2>/dev/null || true
-          rm -f "$MAP_FILE" "$ERROR_LOG" "$STATS_FILE"
-          
-          # 如果没有ipynb文件，退出
-          if [ -z "${{ env.VALID_CHANGED_IPYNB }}" ]; then
-            echo "ℹ️ No changed .ipynb files to process"
-            echo "EXTRACTED_COUNT=0" >> "$GITHUB_ENV"
-            exit 0
-          fi
-          
-          # 统计变量
-          TOTAL_NOTEBOOKS=0
-          EXTRACTED_NOTEBOOKS=0
-          FAILED_NOTEBOOKS=0
-          TOTAL_CELLS=0
-          
-          # 处理每个notebook
-          while IFS= read -r nb_file; do
-            TOTAL_NOTEBOOKS=$((TOTAL_NOTEBOOKS + 1))
+          rm -f "$MAP_FILE" "$ERROR_LOG" 2>/dev/null || true
+
+          # Load notebook list from JSON
+          python3 << 'EOF'
+import json
+import os
+from pathlib import Path
+
+# Load file list
+with open('.ci-cache/markdown-files.json', 'r', encoding='utf-8') as f:
+    files_data = json.load(f)
+
+ipynb_files = files_data.get('ipynb', [])
+if not ipynb_files:
+    print("No notebooks to extract")
+    print("EXTRACTED_COUNT=0")
+    print("SKIPPED_COUNT=0")
+    sys.exit(0)
+
+target_dir = os.environ.get('TARGET_DIR', './temp_md')
+map_file = os.environ.get('MAP_FILE', './md_ipynb_mapping.log')
+error_log = os.environ.get('ERROR_LOG', './extract_error.log')
+
+extracted_count = 0
+skipped_count = 0
+
+for nb_file in ipynb_files:
+    if not os.path.exists(nb_file) or os.path.getsize(nb_file) == 0:
+        with open(error_log, 'a', encoding='utf-8') as f:
+            f.write(f"Skip invalid/empty: {nb_file}\n")
+        skipped_count += 1
+        continue
+    
+    # Validate JSON
+    try:
+        with open(nb_file, 'r', encoding='utf-8') as f:
+            notebook = json.load(f)
+    except Exception as e:
+        with open(error_log, 'a', encoding='utf-8') as f:
+            f.write(f"Invalid JSON in {nb_file}: {str(e)}\n")
+        skipped_count += 1
+        continue
+    
+    # Create safe filename for target
+    # Replace problematic characters
+    safe_name = Path(nb_file).stem
+    for char in ['/', '\\', ':', '*', '?', '"', '<', '>', '|']:
+        safe_name = safe_name.replace(char, '_')
+    
+    # Keep original structure but with safe names
+    rel_path = Path(nb_file)
+    if rel_path.is_absolute():
+        # Create relative path from repo root
+        try:
+            rel_path = rel_path.relative_to(Path.cwd())
+        except:
+            rel_path = Path(safe_name)
+    
+    # Build target path
+    target_path = Path(target_dir) / rel_path.parent / f"{safe_name}.md"
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    
+    # Extract markdown cells
+    markdown_content = []
+    cell_mapping = []
+    
+    for cell_idx, cell in enumerate(notebook.get('cells', [])):
+        if cell.get('cell_type') == 'markdown':
+            source = cell.get('source', [])
+            if isinstance(source, list):
+                content = ''.join(source)
+            else:
+                content = str(source)
             
-            # 基础验证
-            if [ -z "$nb_file" ] || [ ! -f "$nb_file" ] || [ ! -r "$nb_file" ]; then
-              echo "ERROR: Invalid file: $nb_file" >> "$ERROR_LOG"
-              FAILED_NOTEBOOKS=$((FAILED_NOTEBOOKS + 1))
-              continue
-            fi
+            # Add cell marker
+            marker = f"<!-- CELL_IDX: {cell_idx} -->"
+            markdown_content.append(marker)
+            markdown_content.append(content)
             
-            # 验证JSON
-            if ! jq -e . "$nb_file" >/dev/null 2>&1; then
-              echo "ERROR: Invalid JSON in $nb_file" >> "$ERROR_LOG"
-              FAILED_NOTEBOOKS=$((FAILED_NOTEBOOKS + 1))
-              continue
-            fi
-            
-            # 生成输出路径
-            nb_relpath="${nb_file#./}"
-            md_file="$TARGET_DIR/${nb_relpath%.ipynb}.md"
-            mkdir -p "$(dirname "$md_file")"
-            
-            # 提取markdown单元格
-            {
-              echo "# Extracted from: $nb_file"
-              echo "# Generated: $(date -Iseconds)"
-              echo ""
-              
-              # 使用jq提取markdown单元格
-              jq -r '
-                .cells | to_entries[] | 
-                select(.value.cell_type == "markdown") |
-                "<!-- CELL \(.key) -->\n" +
-                (.value.source | if type == "array" then join("") else tostring end)
-              ' "$nb_file" 2>> "$ERROR_LOG"
-            } > "$md_file"
-            
-            # 检查提取结果
-            if [ -s "$md_file" ]; then
-              # 计算单元格数量
-              CELL_COUNT=$(grep -c "<!-- CELL [0-9]\+ -->" "$md_file" || echo 0)
-              TOTAL_CELLS=$((TOTAL_CELLS + CELL_COUNT))
-              
-              # 生成映射表
-              md_line=0
-              cell_idx=0
-              
-              while IFS= read -r line; do
-                md_line=$((md_line + 1))
-                
-                if [[ "$line" =~ \<\!--\ CELL\ ([0-9]+)\ --\> ]]; then
-                  cell_idx="${BASH_REMATCH[1]}"
-                  continue
-                fi
-                
-                echo "$nb_file,$cell_idx,$md_file,$md_line" >> "$MAP_FILE"
-              done < "$md_file"
-              
-              echo "✅ Extracted: $nb_file → $md_file ($CELL_COUNT cells)"
-              EXTRACTED_NOTEBOOKS=$((EXTRACTED_NOTEBOOKS + 1))
-            else
-              echo "⚠️ No markdown cells in $nb_file"
-              rm -f "$md_file"
-            fi
-            
-          done <<< "${{ env.VALID_CHANGED_IPYNB }}"
+            # Record mapping (will be used later)
+            start_line = len(markdown_content) - 1
+            cell_mapping.append({
+                'cell_idx': cell_idx,
+                'start_line': start_line,
+                'content': content[:50] + '...' if len(content) > 50 else content
+            })
+    
+    if not markdown_content:
+        with open(error_log, 'a', encoding='utf-8') as f:
+            f.write(f"No markdown content in {nb_file}\n")
+        skipped_count += 1
+        continue
+    
+    # Write markdown file
+    with open(target_path, 'w', encoding='utf-8') as f:
+        f.write('\n'.join(markdown_content))
+    
+    # Create mapping file (CSV format with escaping)
+    with open(map_file, 'a', encoding='utf-8') as f:
+        line_num = 0
+        for line in markdown_content:
+            line_num += 1
+            if line.startswith('<!-- CELL_IDX:'):
+                continue
+            # Escape commas in filename
+            escaped_nb = nb_file.replace(',', '\\,')
+            f.write(f"{escaped_nb},{cell_idx},{target_path},{line_num}\n")
+    
+    extracted_count += 1
+    print(f"✅ Extracted: {nb_file} → {target_path}")
+
+print(f"EXTRACTED_COUNT={extracted_count}")
+print(f"SKIPPED_COUNT={skipped_count}")
+EOF
+
+          # Capture Python output
+          EXTRACTED_COUNT=$(python3 -c "import sys; print([l for l in open('extract_error.log') if l.startswith('EXTRACTED_COUNT=')][0].split('=')[1]" 2>/dev/null || echo "0")
+          SKIPPED_COUNT=$(python3 -c "import sys; print([l for l in open('extract_error.log') if l.startswith('SKIPPED_COUNT=')][0].split('=')[1]" 2>/dev/null || echo "0")
           
-          # 生成统计信息
-          {
-            echo "EXTRACTED_NOTEBOOKS=$EXTRACTED_NOTEBOOKS"
-            echo "FAILED_NOTEBOOKS=$FAILED_NOTEBOOKS"
-            echo "TOTAL_CELLS=$TOTAL_CELLS"
-            echo "MAP_LINES=$(wc -l < "$MAP_FILE" 2>/dev/null || echo 0)"
-          } > "$STATS_FILE"
-          
-          # 导出统计
-          echo "EXTRACTED_COUNT=$EXTRACTED_NOTEBOOKS" >> "$GITHUB_ENV"
-          
-          # 打印结果
+          echo "EXTRACTED_COUNT=$EXTRACTED_COUNT" >> "$GITHUB_ENV"
+          echo "SKIPPED_COUNT=$SKIPPED_COUNT" >> "$GITHUB_ENV"
+
           echo -e "\n======================================"
           echo "===== Extraction Summary ====="
-          echo "Total notebooks: $TOTAL_NOTEBOOKS"
-          echo "Successfully extracted: $EXTRACTED_NOTEBOOKS"
-          echo "Failed: $FAILED_NOTEBOOKS"
-          echo "Total markdown cells: $TOTAL_CELLS"
-          echo "Mapping entries: $(wc -l < "$MAP_FILE" 2>/dev/null || echo 0)"
+          echo "✅ Extracted: $EXTRACTED_COUNT notebooks"
+          echo "⚠️ Skipped: $SKIPPED_COUNT notebooks"
           
           if [ -s "$ERROR_LOG" ]; then
-            echo -e "\n❌ Errors encountered:"
+            echo "❌ Errors:"
             cat "$ERROR_LOG"
           fi
           echo "======================================"
         shell: bash
 
-      # ==================== 改进的Markdownlint执行 ====================
-      - name: Run markdownlint (Enhanced with better error tracing)
-        if: ${{ env.IPYNB_COUNT > 0 || env.MD_COUNT > 0 }}
+      - name: Install markdownlint
+        if: ${{ env.VALID_CHANGED_IPYNB != '' || env.VALID_CHANGED_MD != '' }}
         run: |
-          set +e
+          npm install -g markdownlint-cli@0.39.0
+          echo "MARKDOWNLINT_VERSION=$(markdownlint --version)" >> "$GITHUB_ENV"
+        shell: bash
+
+      - name: Run markdownlint with Unicode support
+        if: ${{ env.VALID_CHANGED_IPYNB != '' || env.VALID_CHANGED_MD != '' }}
+        run: |
+          set -euo pipefail
+          
           export PYTHONUNBUFFERED=1
           export NODE_UNBUFFERED=1
-          
-          # 安装markdownlint
-          echo "📦 Installing markdownlint-cli..."
-          npm install -g markdownlint-cli@0.39.0
-          
-          # 构建lint路径
-          LINT_PATHS=()
-          MAP_FILE="./md_ipynb_mapping.log"
-          LINT_LOG="markdownlint_output.log"
-          PARSED_ERRORS="markdownlint_errors_parsed.log"
-          
-          # 添加原生markdown文件
-          if [ -n "${{ env.VALID_CHANGED_MD }}" ]; then
-            while IFS= read -r md_file; do
-              [ -n "$md_file" ] && LINT_PATHS+=("$md_file")
-            done <<< "${{ env.VALID_CHANGED_MD }}"
-          fi
-          
-          # 添加提取的markdown文件
-          if [ -d "temp_md" ] && [ -n "$(ls -A temp_md 2>/dev/null)" ]; then
-            LINT_PATHS+=("temp_md/**/*.md")
-          fi
-          
-          # 如果没有文件，退出
-          if [ ${#LINT_PATHS[@]} -eq 0 ]; then
-            echo "✅ No files to lint"
-            exit 0
-          fi
-          
-          echo -e "\n===== Markdownlint Check Paths ====="
-          printf '  - %s\n' "${LINT_PATHS[@]}"
-          echo "======================================"
-          
-          # 运行markdownlint
-          echo "🔍 Running markdownlint..."
-          markdownlint "${LINT_PATHS[@]}" --config .github/.markdownlint.json > "$LINT_LOG" 2>&1
-          LINT_EXIT_CODE=$?
-          
-          # 解析错误并溯源
-          if [ $LINT_EXIT_CODE -ne 0 ] && [ -f "$MAP_FILE" ]; then
-            echo -e "\n===== Markdownlint Errors (Traced to Source) ====="
-            
-            # 读取映射文件到关联数组
-            declare -A CELL_MAP
-            declare -A FILE_CELLS
-            
-            while IFS=',' read -r ipynb_file cell_idx md_file md_line; do
-              key="$md_file:$md_line"
-              CELL_MAP["$key"]="$ipynb_file:$cell_idx"
-              FILE_CELLS["$ipynb_file:$cell_idx"]="$md_file:$md_line"
-            done < "$MAP_FILE"
-            
-            # 解析每个错误
-            while IFS= read -r err_line; do
-              # 跳过非错误行
-              if ! [[ "$err_line" =~ ^[^:]+:[0-9]+ ]]; then
-                continue
-              fi
-              
-              # 提取错误信息
-              err_base=$(echo "$err_line" | cut -d' ' -f1)
-              err_msg=$(echo "$err_line" | cut -d' ' -f2-)
-              
-              # 提取文件和行号
-              md_file=$(echo "$err_base" | rev | cut -d':' -f2- | rev)
-              line_num=$(echo "$err_base" | rev | cut -d':' -f1 | rev | cut -d':' -f1)
-              
-              # 跳过无效行号
-              if ! [[ "$line_num" =~ ^[0-9]+$ ]]; then
-                continue
-              fi
-              
-              # 获取相对路径
-              md_file_rel=$(realpath --relative-to=. "$md_file" 2>/dev/null || echo "$md_file")
-              
-              # 溯源到原始ipynb
-              source_info=""
-              for ((line=line_num; line>=1; line--)); do
-                key="$md_file_rel:$line"
-                if [ -n "${CELL_MAP[$key]}" ]; then
-                  source_info="${CELL_MAP[$key]}"
-                  break
-                fi
-              done
-              
-              if [ -n "$source_info" ]; then
-                ipynb_file=$(echo "$source_info" | cut -d':' -f1)
-                cell_idx=$(echo "$source_info" | cut -d':' -f2)
-                echo -e "❌ Error in original notebook:"
-                echo -e "  File: $ipynb_file (cell $cell_idx)"
-                echo -e "  Error: $err_msg"
-              else
-                # 检查是否是提取的文件
-                if [[ "$md_file_rel" == temp_md/* ]]; then
-                  original_ipynb="${md_file_rel#temp_md/}"
-                  original_ipynb="${original_ipynb%.md}.ipynb"
-                  echo -e "❌ Error in extracted markdown (from $original_ipynb):"
-                  echo -e "  Error: $err_msg"
-                  echo -e "  Hint: Check around line $line_num in the markdown cell"
-                else
-                  echo -e "❌ Error in original markdown file:"
-                  echo -e "  File: $md_file_rel:$line_num"
-                  echo -e "  Error: $err_msg"
-                fi
-              fi
-              echo "--------------------------------------"
-            done < "$LINT_LOG" > "$PARSED_ERRORS"
-            
-            # 显示解析后的错误
-            cat "$PARSED_ERRORS"
-          elif [ $LINT_EXIT_CODE -ne 0 ]; then
-            # 没有映射文件，直接显示原始错误
-            echo -e "\n===== Markdownlint Errors ====="
-            cat "$LINT_LOG"
-          else
-            echo -e "\n✅ All files passed markdownlint check!"
-          fi
-          
-          exit $LINT_EXIT_CODE
+
+          # Build file list
+          python3 << 'EOF'
+import json
+import subprocess
+import sys
+import os
+from pathlib import Path
+
+# Load file list
+with open('.ci-cache/markdown-files.json', 'r', encoding='utf-8') as f:
+    files_data = json.load(f)
+
+md_files = files_data.get('md', [])
+extracted_files = []
+
+# Add extracted markdown files
+target_dir = os.environ.get('TARGET_DIR', './temp_md')
+if os.path.exists(target_dir):
+    for md_file in Path(target_dir).rglob('*.md'):
+        extracted_files.append(str(md_file))
+
+all_files = md_files + extracted_files
+
+if not all_files:
+    print("No files to lint")
+    sys.exit(0)
+
+print(f"\n===== Markdownlint Check Files =====")
+for f in all_files:
+    print(f"  - {f}")
+print("======================================")
+
+# Create file list for markdownlint
+list_file = 'markdownlint_files.txt'
+with open(list_file, 'w', encoding='utf-8') as f:
+    for file in all_files:
+        if os.path.exists(file) and os.path.getsize(file) > 0:
+            f.write(f"{file}\n")
+
+# Run markdownlint
+config_file = '.github/.markdownlint.json'
+if not os.path.exists(config_file):
+    config_file = ''
+
+cmd = ['markdownlint']
+if config_file:
+    cmd.extend(['--config', config_file])
+
+# Add files from list
+with open(list_file, 'r', encoding='utf-8') as f:
+    for line in f:
+        file = line.strip()
+        if file:
+            cmd.append(file)
+
+try:
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    output = result.stdout + result.stderr
+    
+    # Save raw output
+    with open('markdownlint_raw.log', 'w', encoding='utf-8') as f:
+        f.write(output)
+    
+    if result.returncode == 0:
+        print("\n✅ All files passed markdownlint check!")
+        sys.exit(0)
+    
+    # Parse errors and trace to original notebooks
+    print("\n===== Markdownlint Errors (Traced to Source) =====")
+    
+    error_lines = output.split('\n')
+    map_file = os.environ.get('MAP_FILE', './md_ipynb_mapping.log')
+    
+    for line in error_lines:
+        if not line or ':' not in line:
+            continue
+        
+        # Parse error line (format: file:line: error)
+        parts = line.split(':', 2)
+        if len(parts) < 3:
+            continue
+        
+        err_file = parts[0].strip()
+        err_line = parts[1].strip()
+        err_msg = parts[2].strip()
+        
+        # Check if this is an extracted file
+        if target_dir in err_file and os.path.exists(map_file):
+            # Try to find original notebook
+            with open(map_file, 'r', encoding='utf-8') as f:
+                for map_line in f:
+                    map_parts = map_line.strip().split(',', 3)
+                    if len(map_parts) >= 4:
+                        nb_file, cell_idx, md_file, md_line = map_parts
+                        # Unescape commas
+                        nb_file = nb_file.replace('\\,', ',')
+                        
+                        if md_file == err_file and md_line == err_line:
+                            print(f"\n❌ Error in notebook:")
+                            print(f"  Original: {nb_file} (cell ~{cell_idx})")
+                            print(f"  Location: {err_file}:{err_line}")
+                            print(f"  Message: {err_msg}")
+                            break
+                else:
+                    # No mapping found
+                    print(f"\n❌ Error in extracted markdown (no mapping):")
+                    print(f"  File: {err_file}:{err_line}")
+                    print(f"  Message: {err_msg}")
+        else:
+            # Native markdown file
+            print(f"\n❌ Error in markdown file:")
+            print(f"  File: {err_file}:{err_line}")
+            print(f"  Message: {err_msg}")
+    
+    sys.exit(result.returncode)
+    
+except Exception as e:
+    print(f"Error running markdownlint: {e}")
+    sys.exit(1)
+EOF
         shell: bash
         continue-on-error: false
 
       - name: Skip Markdownlint (no files)
-        if: ${{ env.IPYNB_COUNT == 0 && env.MD_COUNT == 0 }}
+        if: ${{ env.VALID_CHANGED_IPYNB == '' && env.VALID_CHANGED_MD == '' }}
         run: |
           echo "✅ No changed MD/IPYNB files, skipping markdownlint"
 
-      # ==================== 清理步骤 ====================
+      - name: Markdownlint Summary
+        if: ${{ always() }}
+        run: |
+          echo "======================================"
+          echo "===== Markdownlint Summary ====="
+          echo "📓 Notebooks extracted: ${{ env.EXTRACTED_COUNT || '0' }}"
+          echo "⚠️ Notebooks skipped: ${{ env.SKIPPED_COUNT || '0' }}"
+          
+          if [ -f "markdownlint_raw.log" ]; then
+            ERROR_COUNT=$(grep -c "^[^:]*:[0-9]*:" markdownlint_raw.log || echo "0")
+            echo "❌ Markdownlint errors: $ERROR_COUNT"
+          fi
+          
+          if [ -n "${{ env.MD_DETECTION_ERRORS }}" ]; then
+            echo -e "\n⚠️ File detection warnings:"
+            echo "${{ env.MD_DETECTION_ERRORS }}" | head -5
+          fi
+          echo "======================================"
+
+      - name: Upload Markdown Results
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: markdown-results
+          path: |
+            temp_md/
+            md_ipynb_mapping.log
+            markdownlint_raw.log
+            .ci-cache/markdown-files.json
+          retention-days: 7
+
       - name: Clean up temporary files
         if: ${{ always() }}
         run: |
           rm -rf temp_md
-          rm -f md_ipynb_mapping.log extract_error.log markdownlint_*.log
-          echo "🧹 Cleanup completed"
+          rm -f md_ipynb_mapping.log *.log
+        shell: bash
+
+  # Final status check job
+  final-status:
+    name: Final Status
+    runs-on: ubuntu-latest
+    needs: [pylint-check, markdownlint-check]
+    if: ${{ always() }}
+    steps:
+      - name: Check all jobs status
+        run: |
+          echo "======================================"
+          echo "===== CI Pipeline Final Status ====="
+          echo "Pylint Check: ${{ needs.pylint-check.result }}"
+          echo "Markdownlint Check: ${{ needs.markdownlint-check.result }}"
+          echo "======================================"
+          
+          if [ "${{ needs.pylint-check.result }}" = "failure" ] || [ "${{ needs.pylint-check.result }}" = "cancelled" ] || \
+             [ "${{ needs.markdownlint-check.result }}" = "failure" ] || [ "${{ needs.markdownlint-check.result }}" = "cancelled" ]; then
+            echo "❌ CI Pipeline failed"
+            exit 1
+          else
+            echo "✅ CI Pipeline passed"
+          fi
+        shell: bash
