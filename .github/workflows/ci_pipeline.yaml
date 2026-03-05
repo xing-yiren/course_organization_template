@@ -91,7 +91,7 @@ jobs:
           find . -type f -name "*.py" -o -name "*.ipynb" | head -20
         shell: bash
 
-           - name: Get Modified Files (Enhanced Unicode Support)
+      - name: Get Modified Files (Enhanced Unicode Support)
         id: get_modified_files
         run: |
           # Enable strict mode but careful with IFS
