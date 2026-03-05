@@ -226,90 +226,90 @@ jobs:
             echo "$ALL_CHANGED_FILES" > "$TEMP_DIR/raw_files.txt"
             
             # Use Python to process files (handles Unicode correctly)
-            python3 << 'EOF'
-            import os
-            import sys
-            import json
-            from pathlib import Path
-            
-            # Setup
-            temp_dir = os.environ.get('TEMP_DIR', '/tmp')
-            valid_py = []
-            valid_ipynb = []
-            errors = []
-            all_files = []
-            
-            # Read all files
-            raw_file_path = os.path.join(temp_dir, 'raw_files.txt')
-            if os.path.exists(raw_file_path):
-                with open(raw_file_path, 'r', encoding='utf-8') as f:
-                    all_files = [line.strip() for line in f if line.strip()]
-            
-            print(f"Processing {len(all_files)} files...")
-            
-            for file_path in all_files:
-                # Clean path
-                file_path = file_path.strip().rstrip('\r')
-                if not file_path:
-                    continue
-                
-                # Check if file exists (might have been deleted)
-                if not os.path.exists(file_path):
-                    errors.append(f"File does not exist (deleted?): {file_path}")
-                    continue
-                
-                # Check if file is empty
-                if os.path.getsize(file_path) == 0:
-                    errors.append(f"Empty file skipped: {file_path}")
-                    continue
-                
-                # Get file extension (case insensitive)
-                ext = Path(file_path).suffix.lower()
-                
-                if ext == '.py':
-                    valid_py.append(file_path)
-                elif ext == '.ipynb':
-                    # Validate notebook JSON
-                    try:
-                        with open(file_path, 'r', encoding='utf-8') as f:
-                            json.load(f)
-                        valid_ipynb.append(file_path)
-                    except json.JSONDecodeError as e:
-                        errors.append(f"Invalid notebook JSON - {file_path}: {str(e)}")
-                    except Exception as e:
-                        errors.append(f"Error reading notebook - {file_path}: {str(e)}")
-                # Other file types are ignored
-            
-            # Save results
-            py_file_path = os.path.join(temp_dir, 'valid_py.txt')
-            ipynb_file_path = os.path.join(temp_dir, 'valid_ipynb.txt')
-            error_file_path = os.path.join(temp_dir, 'errors.log')
-            
-            with open(py_file_path, 'w', encoding='utf-8') as f:
-                f.write('\n'.join(valid_py))
-            
-            with open(ipynb_file_path, 'w', encoding='utf-8') as f:
-                f.write('\n'.join(valid_ipynb))
-            
-            with open(error_file_path, 'w', encoding='utf-8') as f:
-                f.write('\n'.join(errors))
-            
-            # Also create JSON file with all info (for later steps)
-            files_json = {
-                'py': valid_py,
-                'ipynb': valid_ipynb,
-                'errors': errors
-            }
-            
-            json_path = os.path.join(temp_dir, 'files.json')
-            with open(json_path, 'w', encoding='utf-8') as f:
-                json.dump(files_json, f, ensure_ascii=False, indent=2)
-            
-            # Print summary
-            print(f"\nFound {len(valid_py)} Python files, {len(valid_ipynb)} notebook files")
-            if errors:
-                print(f"Warnings/Errors: {len(errors)}")
-            EOF
+            python3 -c '
+import os
+import sys
+import json
+from pathlib import Path
+
+# Setup
+temp_dir = os.environ.get("TEMP_DIR", "/tmp")
+valid_py = []
+valid_ipynb = []
+errors = []
+all_files = []
+
+# Read all files
+raw_file_path = os.path.join(temp_dir, "raw_files.txt")
+if os.path.exists(raw_file_path):
+    with open(raw_file_path, "r", encoding="utf-8") as f:
+        all_files = [line.strip() for line in f if line.strip()]
+
+print(f"Processing {len(all_files)} files...")
+
+for file_path in all_files:
+    # Clean path
+    file_path = file_path.strip().rstrip("\r")
+    if not file_path:
+        continue
+    
+    # Check if file exists (might have been deleted)
+    if not os.path.exists(file_path):
+        errors.append(f"File does not exist (deleted?): {file_path}")
+        continue
+    
+    # Check if file is empty
+    if os.path.getsize(file_path) == 0:
+        errors.append(f"Empty file skipped: {file_path}")
+        continue
+    
+    # Get file extension (case insensitive)
+    ext = Path(file_path).suffix.lower()
+    
+    if ext == ".py":
+        valid_py.append(file_path)
+    elif ext == ".ipynb":
+        # Validate notebook JSON
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                json.load(f)
+            valid_ipynb.append(file_path)
+        except json.JSONDecodeError as e:
+            errors.append(f"Invalid notebook JSON - {file_path}: {str(e)}")
+        except Exception as e:
+            errors.append(f"Error reading notebook - {file_path}: {str(e)}")
+    # Other file types are ignored
+
+# Save results
+py_file_path = os.path.join(temp_dir, "valid_py.txt")
+ipynb_file_path = os.path.join(temp_dir, "valid_ipynb.txt")
+error_file_path = os.path.join(temp_dir, "errors.log")
+
+with open(py_file_path, "w", encoding="utf-8") as f:
+    f.write("\n".join(valid_py))
+
+with open(ipynb_file_path, "w", encoding="utf-8") as f:
+    f.write("\n".join(valid_ipynb))
+
+with open(error_file_path, "w", encoding="utf-8") as f:
+    f.write("\n".join(errors))
+
+# Also create JSON file with all info (for later steps)
+files_json = {
+    "py": valid_py,
+    "ipynb": valid_ipynb,
+    "errors": errors
+}
+
+json_path = os.path.join(temp_dir, "files.json")
+with open(json_path, "w", encoding="utf-8") as f:
+    json.dump(files_json, f, ensure_ascii=False, indent=2)
+
+# Print summary
+print(f"\nFound {len(valid_py)} Python files, {len(valid_ipynb)} notebook files")
+if errors:
+    print(f"Warnings/Errors: {len(errors)}")
+'
           fi
           
           # Read results from Python
@@ -425,7 +425,7 @@ jobs:
           mkdir -p pylint_results
           
           # Read files from JSON (Unicode safe)
-          python3 << 'EOF'
+          python3 -c '
 import json
 import subprocess
 import sys
@@ -434,10 +434,10 @@ import os
 from pathlib import Path
 
 # Load file list
-with open('.ci-cache/pylint-files.json', 'r', encoding='utf-8') as f:
+with open(".ci-cache/pylint-files.json", "r", encoding="utf-8") as f:
     files_data = json.load(f)
 
-py_files = files_data.get('py', [])
+py_files = files_data.get("py", [])
 if not py_files:
     print("No Python files to lint")
     sys.exit(0)
@@ -448,17 +448,17 @@ for f in py_files:
     print(f"  - {f}")
 
 # Create a temporary file with file list (for pylint)
-list_file = 'pylint_files.txt'
-with open(list_file, 'w', encoding='utf-8') as f:
+list_file = "pylint_files.txt"
+with open(list_file, "w", encoding="utf-8") as f:
     for file in py_files:
         f.write(f"{file}\n")
 
 # Run pylint
 num_cores = multiprocessing.cpu_count()
-cmd = ['pylint', f'--jobs={num_cores}', '--rcfile=.github/pylint.conf']
+cmd = ["pylint", f"--jobs={num_cores}", "--rcfile=.github/pylint.conf"]
 
 # Add files from list file (handles special characters better)
-with open(list_file, 'r', encoding='utf-8') as f:
+with open(list_file, "r", encoding="utf-8") as f:
     for line in f:
         file = line.strip()
         if file:
@@ -470,17 +470,17 @@ try:
     output = result.stdout + result.stderr
     
     # Save output
-    with open('pylint_results/pylint_py_logs.txt', 'w', encoding='utf-8') as f:
+    with open("pylint_results/pylint_py_logs.txt", "w", encoding="utf-8") as f:
         f.write(output)
     
     # Print output (with Unicode support)
     print(output)
     
     # Parse results
-    error_count = output.count('E:') + output.count('F:')
-    warning_count = output.count('W:')
-    convention_count = output.count('C:')
-    refactor_count = output.count('R:')
+    error_count = output.count("E:") + output.count("F:")
+    warning_count = output.count("W:")
+    convention_count = output.count("C:")
+    refactor_count = output.count("R:")
     
     print(f"\n📊 Pylint Statistics:")
     print(f"  Errors: {error_count}")
@@ -489,10 +489,10 @@ try:
     print(f"  Refactors: {refactor_count}")
     
     # Save exit code and stats
-    with open('pylint_results/pylint_py_exit_code.txt', 'w') as f:
+    with open("pylint_results/pylint_py_exit_code.txt", "w") as f:
         f.write(str(result.returncode))
     
-    with open('pylint_results/pylint_py_stats.txt', 'w') as f:
+    with open("pylint_results/pylint_py_stats.txt", "w") as f:
         f.write(f"ERROR_COUNT={error_count}\n")
         f.write(f"WARNING_COUNT={warning_count}\n")
         f.write(f"CONVENTION_COUNT={convention_count}\n")
@@ -508,10 +508,10 @@ try:
     
 except Exception as e:
     print(f"Error running pylint: {e}")
-    with open('pylint_results/pylint_py_exit_code.txt', 'w') as f:
+    with open("pylint_results/pylint_py_exit_code.txt", "w") as f:
         f.write("1")
     sys.exit(1)
-EOF
+'
         shell: bash
         continue-on-error: true
 
@@ -548,7 +548,7 @@ EOF
           mkdir -p pylint_results
           
           # Read files from JSON (Unicode safe)
-          python3 << 'EOF'
+          python3 -c '
 import json
 import subprocess
 import sys
@@ -557,10 +557,10 @@ import os
 from pathlib import Path
 
 # Load file list
-with open('.ci-cache/pylint-files.json', 'r', encoding='utf-8') as f:
+with open(".ci-cache/pylint-files.json", "r", encoding="utf-8") as f:
     files_data = json.load(f)
 
-ipynb_files = files_data.get('ipynb', [])
+ipynb_files = files_data.get("ipynb", [])
 if not ipynb_files:
     print("No notebook files to lint")
     sys.exit(0)
@@ -574,7 +574,7 @@ invalid_files = []
 for file in ipynb_files:
     print(f"  - {file}")
     try:
-        with open(file, 'r', encoding='utf-8') as f:
+        with open(file, "r", encoding="utf-8") as f:
             json.load(f)
         valid_files.append(file)
     except Exception as e:
@@ -583,28 +583,28 @@ for file in ipynb_files:
 
 # Save invalid files list
 if invalid_files:
-    with open('pylint_results/invalid_notebooks.txt', 'w', encoding='utf-8') as f:
+    with open("pylint_results/invalid_notebooks.txt", "w", encoding="utf-8") as f:
         for file in invalid_files:
             f.write(f"{file}\n")
 
 if not valid_files:
     print("❌ No valid notebook files to lint")
-    with open('pylint_results/pylint_ipynb_exit_code.txt', 'w') as f:
+    with open("pylint_results/pylint_ipynb_exit_code.txt", "w") as f:
         f.write("255")
     sys.exit(0)
 
 # Create file list for nbqa
-list_file = 'nbqa_files.txt'
-with open(list_file, 'w', encoding='utf-8') as f:
+list_file = "nbqa_files.txt"
+with open(list_file, "w", encoding="utf-8") as f:
     for file in valid_files:
         f.write(f"{file}\n")
 
 # Run nbqa pylint
 num_cores = multiprocessing.cpu_count()
-cmd = ['nbqa', 'pylint', f'--jobs={num_cores}', '--rcfile=.github/pylint.conf']
+cmd = ["nbqa", "pylint", f"--jobs={num_cores}", "--rcfile=.github/pylint.conf"]
 
 # Add files from list
-with open(list_file, 'r', encoding='utf-8') as f:
+with open(list_file, "r", encoding="utf-8") as f:
     for line in f:
         file = line.strip()
         if file:
@@ -615,25 +615,25 @@ try:
     output = result.stdout + result.stderr
     
     # Save output
-    with open('pylint_results/pylint_ipynb_logs.txt', 'w', encoding='utf-8') as f:
+    with open("pylint_results/pylint_ipynb_logs.txt", "w", encoding="utf-8") as f:
         f.write(output)
     
     # Print output
     print(output)
     
     # Parse results
-    error_count = output.count('E:') + output.count('F:')
-    warning_count = output.count('W:')
+    error_count = output.count("E:") + output.count("F:")
+    warning_count = output.count("W:")
     
     print(f"\n📊 nbqa Pylint Statistics:")
     print(f"  Errors: {error_count}")
     print(f"  Warnings: {warning_count}")
     
     # Save exit code and stats
-    with open('pylint_results/pylint_ipynb_exit_code.txt', 'w') as f:
+    with open("pylint_results/pylint_ipynb_exit_code.txt", "w") as f:
         f.write(str(result.returncode))
     
-    with open('pylint_results/pylint_ipynb_stats.txt', 'w') as f:
+    with open("pylint_results/pylint_ipynb_stats.txt", "w") as f:
         f.write(f"ERROR_COUNT={error_count}\n")
         f.write(f"WARNING_COUNT={warning_count}\n")
         f.write(f"INVALID_COUNT={len(invalid_files)}\n")
@@ -648,10 +648,10 @@ try:
     
 except Exception as e:
     print(f"Error running nbqa pylint: {e}")
-    with open('pylint_results/pylint_ipynb_exit_code.txt', 'w') as f:
+    with open("pylint_results/pylint_ipynb_exit_code.txt", "w") as f:
         f.write("1")
     sys.exit(1)
-EOF
+'
         shell: bash
         continue-on-error: true
 
@@ -843,21 +843,21 @@ EOF
           if [ -n "$ALL_CHANGED_FILES" ]; then
             echo "$ALL_CHANGED_FILES" > "$TEMP_DIR/raw_files.txt"
             
-            python3 << 'EOF'
+            python3 -c '
 import os
 import json
 from pathlib import Path
 
-temp_dir = os.environ.get('TEMP_DIR', '/tmp')
+temp_dir = os.environ.get("TEMP_DIR", "/tmp")
 valid_ipynb = []
 valid_md = []
 errors = []
 
-raw_file_path = os.path.join(temp_dir, 'raw_files.txt')
+raw_file_path = os.path.join(temp_dir, "raw_files.txt")
 if os.path.exists(raw_file_path):
-    with open(raw_file_path, 'r', encoding='utf-8') as f:
+    with open(raw_file_path, "r", encoding="utf-8") as f:
         for line in f:
-            file_path = line.strip().rstrip('\r')
+            file_path = line.strip().rstrip("\r")
             if not file_path:
                 continue
             
@@ -872,39 +872,39 @@ if os.path.exists(raw_file_path):
             
             ext = Path(file_path).suffix.lower()
             
-            if ext == '.ipynb':
+            if ext == ".ipynb":
                 # Validate notebook JSON
                 try:
-                    with open(file_path, 'r', encoding='utf-8') as f:
+                    with open(file_path, "r", encoding="utf-8") as f:
                         json.load(f)
                     valid_ipynb.append(file_path)
                 except Exception as e:
                     errors.append(f"Invalid notebook {file_path}: {str(e)}")
-            elif ext == '.md':
+            elif ext == ".md":
                 valid_md.append(file_path)
 
 # Save results
-with open(os.path.join(temp_dir, 'valid_ipynb.txt'), 'w', encoding='utf-8') as f:
-    f.write('\n'.join(valid_ipynb))
+with open(os.path.join(temp_dir, "valid_ipynb.txt"), "w", encoding="utf-8") as f:
+    f.write("\n".join(valid_ipynb))
 
-with open(os.path.join(temp_dir, 'valid_md.txt'), 'w', encoding='utf-8') as f:
-    f.write('\n'.join(valid_md))
+with open(os.path.join(temp_dir, "valid_md.txt"), "w", encoding="utf-8") as f:
+    f.write("\n".join(valid_md))
 
-with open(os.path.join(temp_dir, 'errors.log'), 'w', encoding='utf-8') as f:
-    f.write('\n'.join(errors))
+with open(os.path.join(temp_dir, "errors.log"), "w", encoding="utf-8") as f:
+    f.write("\n".join(errors))
 
 # Create JSON file
 files_json = {
-    'ipynb': valid_ipynb,
-    'md': valid_md,
-    'errors': errors
+    "ipynb": valid_ipynb,
+    "md": valid_md,
+    "errors": errors
 }
 
-with open(os.path.join(temp_dir, 'markdown-files.json'), 'w', encoding='utf-8') as f:
+with open(os.path.join(temp_dir, "markdown-files.json"), "w", encoding="utf-8") as f:
     json.dump(files_json, f, ensure_ascii=False, indent=2)
 
 print(f"Found {len(valid_ipynb)} notebooks, {len(valid_md)} markdown files")
-EOF
+'
           fi
           
           # Read results
@@ -998,42 +998,42 @@ EOF
           rm -f "$MAP_FILE" "$ERROR_LOG" 2>/dev/null || true
 
           # Load notebook list from JSON
-          python3 << 'EOF'
+          python3 -c '
 import json
 import os
 from pathlib import Path
 
 # Load file list
-with open('.ci-cache/markdown-files.json', 'r', encoding='utf-8') as f:
+with open(".ci-cache/markdown-files.json", "r", encoding="utf-8") as f:
     files_data = json.load(f)
 
-ipynb_files = files_data.get('ipynb', [])
+ipynb_files = files_data.get("ipynb", [])
 if not ipynb_files:
     print("No notebooks to extract")
     print("EXTRACTED_COUNT=0")
     print("SKIPPED_COUNT=0")
     sys.exit(0)
 
-target_dir = os.environ.get('TARGET_DIR', './temp_md')
-map_file = os.environ.get('MAP_FILE', './md_ipynb_mapping.log')
-error_log = os.environ.get('ERROR_LOG', './extract_error.log')
+target_dir = os.environ.get("TARGET_DIR", "./temp_md")
+map_file = os.environ.get("MAP_FILE", "./md_ipynb_mapping.log")
+error_log = os.environ.get("ERROR_LOG", "./extract_error.log")
 
 extracted_count = 0
 skipped_count = 0
 
 for nb_file in ipynb_files:
     if not os.path.exists(nb_file) or os.path.getsize(nb_file) == 0:
-        with open(error_log, 'a', encoding='utf-8') as f:
+        with open(error_log, "a", encoding="utf-8") as f:
             f.write(f"Skip invalid/empty: {nb_file}\n")
         skipped_count += 1
         continue
     
     # Validate JSON
     try:
-        with open(nb_file, 'r', encoding='utf-8') as f:
+        with open(nb_file, "r", encoding="utf-8") as f:
             notebook = json.load(f)
     except Exception as e:
-        with open(error_log, 'a', encoding='utf-8') as f:
+        with open(error_log, "a", encoding="utf-8") as f:
             f.write(f"Invalid JSON in {nb_file}: {str(e)}\n")
         skipped_count += 1
         continue
@@ -1041,8 +1041,8 @@ for nb_file in ipynb_files:
     # Create safe filename for target
     # Replace problematic characters
     safe_name = Path(nb_file).stem
-    for char in ['/', '\\', ':', '*', '?', '"', '<', '>', '|']:
-        safe_name = safe_name.replace(char, '_')
+    for char in ["/", "\\", ":", "*", "?", '"', "<", ">", "|"]:
+        safe_name = safe_name.replace(char, "_")
     
     # Keep original structure but with safe names
     rel_path = Path(nb_file)
@@ -1061,11 +1061,11 @@ for nb_file in ipynb_files:
     markdown_content = []
     cell_mapping = []
     
-    for cell_idx, cell in enumerate(notebook.get('cells', [])):
-        if cell.get('cell_type') == 'markdown':
-            source = cell.get('source', [])
+    for cell_idx, cell in enumerate(notebook.get("cells", [])):
+        if cell.get("cell_type") == "markdown":
+            source = cell.get("source", [])
             if isinstance(source, list):
-                content = ''.join(source)
+                content = "".join(source)
             else:
                 content = str(source)
             
@@ -1077,30 +1077,30 @@ for nb_file in ipynb_files:
             # Record mapping (will be used later)
             start_line = len(markdown_content) - 1
             cell_mapping.append({
-                'cell_idx': cell_idx,
-                'start_line': start_line,
-                'content': content[:50] + '...' if len(content) > 50 else content
+                "cell_idx": cell_idx,
+                "start_line": start_line,
+                "content": content[:50] + "..." if len(content) > 50 else content
             })
     
     if not markdown_content:
-        with open(error_log, 'a', encoding='utf-8') as f:
+        with open(error_log, "a", encoding="utf-8") as f:
             f.write(f"No markdown content in {nb_file}\n")
         skipped_count += 1
         continue
     
     # Write markdown file
-    with open(target_path, 'w', encoding='utf-8') as f:
-        f.write('\n'.join(markdown_content))
+    with open(target_path, "w", encoding="utf-8") as f:
+        f.write("\n".join(markdown_content))
     
     # Create mapping file (CSV format with escaping)
-    with open(map_file, 'a', encoding='utf-8') as f:
+    with open(map_file, "a", encoding="utf-8") as f:
         line_num = 0
         for line in markdown_content:
             line_num += 1
-            if line.startswith('<!-- CELL_IDX:'):
+            if line.startswith("<!-- CELL_IDX:"):
                 continue
             # Escape commas in filename
-            escaped_nb = nb_file.replace(',', '\\,')
+            escaped_nb = nb_file.replace(",", "\\,")
             f.write(f"{escaped_nb},{cell_idx},{target_path},{line_num}\n")
     
     extracted_count += 1
@@ -1108,7 +1108,7 @@ for nb_file in ipynb_files:
 
 print(f"EXTRACTED_COUNT={extracted_count}")
 print(f"SKIPPED_COUNT={skipped_count}")
-EOF
+'
 
           # Capture Python output
           EXTRACTED_COUNT=$(python3 -c "import sys; print([l for l in open('extract_error.log') if l.startswith('EXTRACTED_COUNT=')][0].split('=')[1]" 2>/dev/null || echo "0")
@@ -1145,7 +1145,7 @@ EOF
           export NODE_UNBUFFERED=1
 
           # Build file list
-          python3 << 'EOF'
+          python3 -c '
 import json
 import subprocess
 import sys
@@ -1153,16 +1153,16 @@ import os
 from pathlib import Path
 
 # Load file list
-with open('.ci-cache/markdown-files.json', 'r', encoding='utf-8') as f:
+with open(".ci-cache/markdown-files.json", "r", encoding="utf-8") as f:
     files_data = json.load(f)
 
-md_files = files_data.get('md', [])
+md_files = files_data.get("md", [])
 extracted_files = []
 
 # Add extracted markdown files
-target_dir = os.environ.get('TARGET_DIR', './temp_md')
+target_dir = os.environ.get("TARGET_DIR", "./temp_md")
 if os.path.exists(target_dir):
-    for md_file in Path(target_dir).rglob('*.md'):
+    for md_file in Path(target_dir).rglob("*.md"):
         extracted_files.append(str(md_file))
 
 all_files = md_files + extracted_files
@@ -1177,23 +1177,23 @@ for f in all_files:
 print("======================================")
 
 # Create file list for markdownlint
-list_file = 'markdownlint_files.txt'
-with open(list_file, 'w', encoding='utf-8') as f:
+list_file = "markdownlint_files.txt"
+with open(list_file, "w", encoding="utf-8") as f:
     for file in all_files:
         if os.path.exists(file) and os.path.getsize(file) > 0:
             f.write(f"{file}\n")
 
 # Run markdownlint
-config_file = '.github/.markdownlint.json'
+config_file = ".github/.markdownlint.json"
 if not os.path.exists(config_file):
-    config_file = ''
+    config_file = ""
 
-cmd = ['markdownlint']
+cmd = ["markdownlint"]
 if config_file:
-    cmd.extend(['--config', config_file])
+    cmd.extend(["--config", config_file])
 
 # Add files from list
-with open(list_file, 'r', encoding='utf-8') as f:
+with open(list_file, "r", encoding="utf-8") as f:
     for line in f:
         file = line.strip()
         if file:
@@ -1204,7 +1204,7 @@ try:
     output = result.stdout + result.stderr
     
     # Save raw output
-    with open('markdownlint_raw.log', 'w', encoding='utf-8') as f:
+    with open("markdownlint_raw.log", "w", encoding="utf-8") as f:
         f.write(output)
     
     if result.returncode == 0:
@@ -1214,15 +1214,15 @@ try:
     # Parse errors and trace to original notebooks
     print("\n===== Markdownlint Errors (Traced to Source) =====")
     
-    error_lines = output.split('\n')
-    map_file = os.environ.get('MAP_FILE', './md_ipynb_mapping.log')
+    error_lines = output.split("\n")
+    map_file = os.environ.get("MAP_FILE", "./md_ipynb_mapping.log")
     
     for line in error_lines:
-        if not line or ':' not in line:
+        if not line or ":" not in line:
             continue
         
         # Parse error line (format: file:line: error)
-        parts = line.split(':', 2)
+        parts = line.split(":", 2)
         if len(parts) < 3:
             continue
         
@@ -1233,22 +1233,24 @@ try:
         # Check if this is an extracted file
         if target_dir in err_file and os.path.exists(map_file):
             # Try to find original notebook
-            with open(map_file, 'r', encoding='utf-8') as f:
+            with open(map_file, "r", encoding="utf-8") as f:
+                found = False
                 for map_line in f:
-                    map_parts = map_line.strip().split(',', 3)
+                    map_parts = map_line.strip().split(",", 3)
                     if len(map_parts) >= 4:
-                        nb_file, cell_idx, md_file, md_line = map_parts
-                        # Unescape commas
-                        nb_file = nb_file.replace('\\,', ',')
+                        nb_file = map_parts[0].replace("\\,", ",")
+                        cell_idx = map_parts[1]
+                        md_file = map_parts[2]
+                        md_line = map_parts[3]
                         
                         if md_file == err_file and md_line == err_line:
                             print(f"\n❌ Error in notebook:")
                             print(f"  Original: {nb_file} (cell ~{cell_idx})")
                             print(f"  Location: {err_file}:{err_line}")
                             print(f"  Message: {err_msg}")
+                            found = True
                             break
-                else:
-                    # No mapping found
+                if not found:
                     print(f"\n❌ Error in extracted markdown (no mapping):")
                     print(f"  File: {err_file}:{err_line}")
                     print(f"  Message: {err_msg}")
@@ -1263,7 +1265,7 @@ try:
 except Exception as e:
     print(f"Error running markdownlint: {e}")
     sys.exit(1)
-EOF
+'
         shell: bash
         continue-on-error: false
 
