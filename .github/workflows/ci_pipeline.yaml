@@ -1,402 +1,557 @@
-# This is a workflow for Pylint and Markdownlint check.
-# Version: 2.0 - Enhanced Unicode support and error handling
+name: CI Pipeline (Robust Version)
 
-name: CI Pipeline
-
-# Controls when the workflow will run
 on:
   push:
     branches: [ "*" ]
   pull_request:
     branches: [ "*" ]
-  # Allows you to run this workflow manually from the Actions tab
   workflow_dispatch:
-    inputs:
-      debug_enabled:
-        description: 'Enable debug mode'
-        type: boolean
-        default: false
-      force_check_all:
-        description: 'Force check all files (ignore changes)'
-        type: boolean
-        default: false
 
-# Global environment settings for Unicode support
 env:
-  LANG: C.UTF-8
-  LC_ALL: C.UTF-8
-  PYTHONIOENCODING: utf-8
-  PYTHONUTF8: 1
+  LC_ALL: en_US.UTF-8
+  LANG: en_US.UTF-8
+  LC_CTYPE: en_US.UTF-8
+  PIP_VERSION: "24.0"
+  MARKDOWNLINT_CLI_VERSION: "0.39.0"
+  PYLINT_VERSION: "3.2.2"
+  NBQA_VERSION: "1.8.6"
 
-# A workflow run is made up of one or more jobs that can run sequentially or in parallel
 jobs:
   pylint-check:
     name: Pylint Check
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    # Add concurrency to cancel outdated runs
-    concurrency:
-      group: ${{ github.workflow }}-${{ github.ref }}-pylint
-      cancel-in-progress: true
-
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # Need full history for git diff
-          
-      - name: Setup Environment for Unicode
-        run: |
-          # Configure git for Unicode filenames
-          git config --global core.quotepath false
-          git config --global core.precomposeunicode true
-          
-          # Show environment info
-          echo "✅ Environment configured:"
-          echo "  LANG: $LANG"
-          echo "  LC_ALL: $LC_ALL"
-        shell: bash
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: 3.11
+          python-version: "3.11"
           cache: "pip"
 
-      - name: Install dependencies
+      - name: Install dependencies (Locked Versions)
         run: |
-          python -m pip install --upgrade pip==24.0
+          python -m pip install --upgrade pip==${{ env.PIP_VERSION }}
           pip install torch --index-url https://download.pytorch.org/whl/cpu
-          pip install pylint nbqa
+          pip install pylint==${{ env.PYLINT_VERSION }} nbqa==${{ env.NBQA_VERSION }}
           if [ -f "requirements.txt" ]; then 
-            pip install -r requirements.txt
+            pip install -r requirements.txt 
           fi
-          
-          # Verify installations
-          echo "✅ Installed versions:"
-          echo "  Pylint: $(pylint --version | head -1)"
-          echo "  Python: $(python --version)"
         shell: bash
 
-      - name: Debug - Show Environment
-        if: ${{ github.event.inputs.debug_enabled == 'true' }}
-        run: |
-          echo "🔍 Debug Mode Enabled"
-          echo "Event: ${{ github.event_name }}"
-          echo "Repository: ${{ github.repository }}"
-          echo "Branch: ${{ github.ref }}"
-          echo "Force check all: ${{ github.event.inputs.force_check_all }}"
-          echo "Current directory: $(pwd)"
-          echo "Files in repo:"
-          find . -type f -name "*.py" -o -name "*.ipynb" | head -20
-        shell: bash
-
-      - name: Get Modified Files (Enhanced Unicode Support)
+      - name: Get Modified .py/.ipynb Files (Robust)
         id: get_modified_files
         run: |
-          # Enable strict mode but careful with IFS
           set -euo pipefail
-          
-          # Create temp directory for file lists
-          TEMP_DIR=$(mktemp -d)
-          VALID_PY_FILE="$TEMP_DIR/valid_py.txt"
-          VALID_IPYNB_FILE="$TEMP_DIR/valid_ipynb.txt"
-          ALL_FILES_FILE="$TEMP_DIR/all_files.txt"
-          ERROR_LOG="$TEMP_DIR/errors.log"
-          
-          # Initialize files
-          > "$VALID_PY_FILE"
-          > "$VALID_IPYNB_FILE"
-          > "$ALL_FILES_FILE"
-          > "$ERROR_LOG"
-          
-          echo "🔍 Detecting changed files..."
-          
-          # Determine if we should force check all files
-          FORCE_ALL="${{ github.event.inputs.force_check_all == 'true' }}"
-          
-          if [ "$FORCE_ALL" = "true" ]; then
-            echo "🔧 Force check all files enabled"
-            ALL_CHANGED_FILES=$(git ls-files)
+
+          declare -a VALID_CHANGED_PY=()
+          declare -a VALID_CHANGED_IPYNB=()
+          ALL_CHANGED_FILES=""
+
+          if ! command -v jq &> /dev/null; then
+            sudo apt update -y && sudo apt install jq -y || { echo "❌ Failed to install jq"; exit 1; }
+          fi
+
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "🔍 PR Mode: Get changed files via GitHub API (with retry)"
+            # ========== 核心修改1：curl 参数数组化 ==========
+            # 定义 curl 参数数组（避免字符串拼接，兼容特殊字符）
+            declare -a CURL_ARGS=(
+              -s
+              --retry 3
+              --retry-delay 2
+              -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}"
+              -H "Accept: application/vnd.github+json"
+              -H "X-GitHub-Api-Version: 2022-11-28"
+              "https://api.github.com/repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files"
+            )
+            # 执行 curl（数组传参）
+            ALL_CHANGED_FILES=$(curl "${CURL_ARGS[@]}" | jq -r '.[] | select(.status != "removed") | .filename' || echo "")
           else
-            # Get changed files based on event type
-            if [ "${{ github.event_name }}" = "pull_request" ]; then
-              echo "🔍 PR Mode: Getting changed files via GitHub API (with pagination)"
-              
-              # Install jq if needed
-              if ! command -v jq &> /dev/null; then
-                sudo apt update && sudo apt install jq -y
-              fi
-              
-              # API call with pagination and retry
-              MAX_RETRIES=3
-              RETRY_COUNT=0
-              API_SUCCESS=false
-              PAGE=1
-              TEMP_JSON="$TEMP_DIR/api_response.json"
-              
-              while [ $RETRY_COUNT -lt $MAX_RETRIES ] && [ "$API_SUCCESS" = "false" ]; do
-                if [ $RETRY_COUNT -gt 0 ]; then
-                  echo "Retry $RETRY_COUNT of $MAX_RETRIES..."
-                  sleep 5
-                fi
-                
-                PAGE=1
-                > "$ALL_FILES_FILE"
-                
-                while true; do
-                  echo "Fetching page $PAGE..."
-                  
-                  # Define curl arguments as an array
-                  CURL_ARGS=(
-                    -s
-                    -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}"
-                    -H "Accept: application/vnd.github+json"
-                    -H "X-GitHub-Api-Version: 2022-11-28"
-                    "https://api.github.com/repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files?per_page=100&page=$PAGE"
-                  )
-                  
-                  # Execute curl with arguments array
-                  if ! curl "${CURL_ARGS[@]}" -o "$TEMP_JSON"; then
-                    echo "❌ Failed to fetch page $PAGE" >> "$ERROR_LOG"
-                    break
-                  fi
-                  
-                  # Check if response is valid JSON
-                  if ! jq empty "$TEMP_JSON" 2>/dev/null; then
-                    echo "❌ Invalid JSON response" >> "$ERROR_LOG"
-                    break
-                  fi
-                  
-                  # Check if we got an error from API
-                  if jq -e '.message' "$TEMP_JSON" > /dev/null 2>&1; then
-                    ERROR_MSG=$(jq -r '.message' "$TEMP_JSON")
-                    echo "❌ API Error: $ERROR_MSG" >> "$ERROR_LOG"
-                    break
-                  fi
-                  
-                  # Extract filenames (not removed)
-                  jq -r '.[] | select(.status != "removed") | .filename' "$TEMP_JSON" >> "$ALL_FILES_FILE"
-                  
-                  # Check if this is the last page
-                  FILE_COUNT=$(jq length "$TEMP_JSON")
-                  if [ "$FILE_COUNT" -lt 100 ]; then
-                    break
-                  fi
-                  
-                  PAGE=$((PAGE + 1))
-                done
-                
-                if [ -s "$ALL_FILES_FILE" ]; then
-                  API_SUCCESS=true
-                else
-                  RETRY_COUNT=$((RETRY_COUNT + 1))
-                fi
-              done
-              
-              if [ "$API_SUCCESS" = "true" ]; then
-                ALL_CHANGED_FILES=$(cat "$ALL_FILES_FILE")
-              else
-                echo "⚠️ API failed, falling back to git diff" >> "$ERROR_LOG"
-                # Fallback to git diff
-                if git rev-parse --verify HEAD^ >/dev/null 2>&1; then
-                  ALL_CHANGED_FILES=$(git diff --name-only HEAD^ HEAD --diff-filter=ACMRT)
-                else
-                  ALL_CHANGED_FILES=$(git ls-files)
-                fi
-              fi
-              
+            echo "🔍 Push Mode: Get changed files via git diff"
+            if git rev-parse --verify HEAD^ >/dev/null 2>&1; then
+              ALL_CHANGED_FILES=$(git diff --name-only HEAD^ HEAD --diff-filter=ACMRT)
             else
-              # Push mode
-              echo "🔍 Push Mode: Getting changed files via git diff"
-              
-              # Check if this is first commit
-              if git rev-parse --verify HEAD^ >/dev/null 2>&1; then
-                ALL_CHANGED_FILES=$(git diff --name-only HEAD^ HEAD --diff-filter=ACMRT)
-              else
-                echo "⚠️ First commit detected, checking all files"
-                ALL_CHANGED_FILES=$(git ls-files)
-              fi
+              ALL_CHANGED_FILES=$(git ls-files)
             fi
           fi
-          
-          # Process files with Python (best for Unicode handling)
-          if [ -n "$ALL_CHANGED_FILES" ]; then
-            # Save to temp file for Python processing
-            echo "$ALL_CHANGED_FILES" > "$TEMP_DIR/raw_files.txt"
-            
-            # Create a Python script file and execute it (avoid YAML string issues)
-            cat > "$TEMP_DIR/process_files.py" << 'PYTHON_SCRIPT'
-import os
-import sys
-import json
-from pathlib import Path
 
-# Setup
-temp_dir = os.environ.get('TEMP_DIR', '/tmp')
-valid_py = []
-valid_ipynb = []
-errors = []
-all_files = []
+          while IFS= read -r file; do
+            if [ -z "$file" ] || [ ! -f "$file" ] || [ ! -s "$file" ]; then
+              continue
+            fi
+            if [[ "$file" =~ [\n\r\"\'\\] ]]; then
+              echo "⚠️ Skip file with invalid characters: $file"
+              continue
+            fi
+            if [[ "$file" =~ \.py$ ]]; then
+              VALID_CHANGED_PY+=("$file")
+            elif [[ "$file" =~ \.ipynb$ ]]; then
+              VALID_CHANGED_IPYNB+=("$file")
+            fi
+          done <<< "$ALL_CHANGED_FILES"
 
-# Read all files
-raw_file_path = os.path.join(temp_dir, 'raw_files.txt')
-if os.path.exists(raw_file_path):
-    with open(raw_file_path, 'r', encoding='utf-8') as f:
-        all_files = [line.strip() for line in f if line.strip()]
+          echo "VALID_CHANGED_PY<<EOF" >> "$GITHUB_ENV"
+          printf "%s\n" "${VALID_CHANGED_PY[@]}" >> "$GITHUB_ENV"
+          echo "EOF" >> "$GITHUB_ENV"
 
-print(f"Processing {len(all_files)} files...")
+          echo "VALID_CHANGED_IPYNB<<EOF" >> "$GITHUB_ENV"
+          printf "%s\n" "${VALID_CHANGED_IPYNB[@]}" >> "$GITHUB_ENV"
+          echo "EOF" >> "$GITHUB_ENV"
 
-for file_path in all_files:
-    # Clean path
-    file_path = file_path.strip().rstrip('\r')
-    if not file_path:
-        continue
-    
-    # Check if file exists (might have been deleted)
-    if not os.path.exists(file_path):
-        errors.append(f"File does not exist (deleted?): {file_path}")
-        continue
-    
-    # Check if file is empty
-    if os.path.getsize(file_path) == 0:
-        errors.append(f"Empty file skipped: {file_path}")
-        continue
-    
-    # Get file extension (case insensitive)
-    ext = Path(file_path).suffix.lower()
-    
-    if ext == '.py':
-        valid_py.append(file_path)
-    elif ext == '.ipynb':
-        # Validate notebook JSON
-        try:
-            with open(file_path, 'r', encoding='utf-8') as f:
-                json.load(f)
-            valid_ipynb.append(file_path)
-        except json.JSONDecodeError as e:
-            errors.append(f"Invalid notebook JSON - {file_path}: {str(e)}")
-        except Exception as e:
-            errors.append(f"Error reading notebook - {file_path}: {str(e)}")
-    # Other file types are ignored
+          PY_FILE_COUNT=${#VALID_CHANGED_PY[@]}
+          IPYNB_FILE_COUNT=${#VALID_CHANGED_IPYNB[@]}
 
-# Save results
-py_file_path = os.path.join(temp_dir, 'valid_py.txt')
-ipynb_file_path = os.path.join(temp_dir, 'valid_ipynb.txt')
-error_file_path = os.path.join(temp_dir, 'errors.log')
-
-with open(py_file_path, 'w', encoding='utf-8') as f:
-    f.write('\n'.join(valid_py))
-
-with open(ipynb_file_path, 'w', encoding='utf-8') as f:
-    f.write('\n'.join(valid_ipynb))
-
-with open(error_file_path, 'w', encoding='utf-8') as f:
-    f.write('\n'.join(errors))
-
-# Also create JSON file with all info (for later steps)
-files_json = {
-    'py': valid_py,
-    'ipynb': valid_ipynb,
-    'errors': errors
-}
-
-json_path = os.path.join(temp_dir, 'files.json')
-with open(json_path, 'w', encoding='utf-8') as f:
-    json.dump(files_json, f, ensure_ascii=False, indent=2)
-
-# Print summary
-print(f"\nFound {len(valid_py)} Python files, {len(valid_ipynb)} notebook files")
-if errors:
-    print(f"Warnings/Errors: {len(errors)}")
-PYTHON_SCRIPT
-
-            # Execute the Python script
-            python3 "$TEMP_DIR/process_files.py"
-          fi
-          
-          # Read results from Python
-          if [ -f "$TEMP_DIR/valid_py.txt" ]; then
-            VALID_CHANGED_PY=$(cat "$TEMP_DIR/valid_py.txt")
-          fi
-          
-          if [ -f "$TEMP_DIR/valid_ipynb.txt" ]; then
-            VALID_CHANGED_IPYNB=$(cat "$TEMP_DIR/valid_ipynb.txt")
-          fi
-          
-          if [ -f "$TEMP_DIR/errors.log" ] && [ -s "$TEMP_DIR/errors.log" ]; then
-            ERRORS=$(cat "$TEMP_DIR/errors.log")
-          fi
-          
-          # Save to GitHub environment using heredoc (safe for Unicode)
-          {
-            echo "VALID_CHANGED_PY<<EOF_PY"
-            echo "$VALID_CHANGED_PY"
-            echo "EOF_PY"
-            
-            echo "VALID_CHANGED_IPYNB<<EOF_IPYNB"
-            echo "$VALID_CHANGED_IPYNB"
-            echo "EOF_IPYNB"
-          } >> "$GITHUB_ENV"
-
-          if [ -n "$ERRORS" ]; then
-            {
-              echo "FILE_DETECTION_ERRORS<<EOF_ERR"
-              echo "$ERRORS"
-              echo "EOF_ERR"
-            } >> "$GITHUB_ENV"
-          fi
-          
-          # Count files
-          PY_FILE_COUNT=$(echo "$VALID_CHANGED_PY" | grep -c '^' || echo "0")
-          IPYNB_FILE_COUNT=$(echo "$VALID_CHANGED_IPYNB" | grep -c '^' || echo "0")
-          
           echo "PY_FILE_COUNT=$PY_FILE_COUNT" >> "$GITHUB_ENV"
           echo "IPYNB_FILE_COUNT=$IPYNB_FILE_COUNT" >> "$GITHUB_ENV"
-          
-          # Create a JSON file for later steps (safe for Unicode)
-          mkdir -p .ci-cache
-          if [ -f "$TEMP_DIR/files.json" ]; then
-            cp "$TEMP_DIR/files.json" .ci-cache/pylint-files.json
-          else
-            echo '{"py":[],"ipynb":[],"errors":[]}' > .ci-cache/pylint-files.json
-          fi
-          
-          # Print summary
+
           echo "======================================"
           echo "===== Changed Files Summary ====="
-          echo "✅ Changed .py files (to lint):"
-          if [ -z "$VALID_CHANGED_PY" ]; then
+          echo "✅  Changed .py files (to lint):"
+          if [ $PY_FILE_COUNT -eq 0 ]; then
             echo "  - None"
           else
-            echo "$VALID_CHANGED_PY" | while IFS= read -r f; do 
-              if [ -n "$f" ]; then
-                echo "  - $f"
-              fi
-            done
+            for f in "${VALID_CHANGED_PY[@]}"; do echo "  - $f"; done
           fi
-          
-          echo "✅ Changed .ipynb files (to lint):"
-          if [ -z "$VALID_CHANGED_IPYNB" ]; then
+          echo "✅  Changed .ipynb files (to lint):"
+          if [ $IPYNB_FILE_COUNT -eq 0 ]; then
             echo "  - None"
           else
-            echo "$VALID_CHANGED_IPYNB" | while IFS= read -r f; do 
-              if [ -n "$f" ]; then
-                echo "  - $f"
-              fi
-            done
-          fi
-          
-          if [ -n "$ERRORS" ]; then
-            echo "⚠️ Warnings/Errors:"
-            echo "$ERRORS" | while IFS= read -r line; do
-              if [ -n "$line" ]; then
-                echo "  - $line"
-              fi
-            done
+            for f in "${VALID_CHANGED_IPYNB[@]}"; do echo "  - $f"; done
           fi
           echo "======================================"
+        shell: bash
+
+      - name: Run Pylint for .py files (Array Args)
+        if: ${{ env.PY_FILE_COUNT > 0 }}
+        run: |
+          NUM_CORES=$(nproc)
+          echo "🔧 Running Pylint on modified .py files..."
+
+          declare -a PY_FILES=()
+          while IFS= read -r file; do
+            [ -n "$file" ] && PY_FILES+=("$file")
+          done <<< "${{ env.VALID_CHANGED_PY }}"
+
+          pylint "${PY_FILES[@]}" --jobs=$NUM_CORES --rcfile=.github/pylint.conf 2>&1 | tee pylint_py_logs.txt
+          PYLINT_EXIT_CODE=${PIPESTATUS[0]}
+
+          echo "$PYLINT_EXIT_CODE" > pylint_py_exit_code.txt
+
+          if [ $PYLINT_EXIT_CODE -eq 0 ]; then
+            echo "✅ .py files Pylint check passed"
+          else
+            echo "❌ .py files Pylint check failed, see details in pylint_py_logs.txt"
+          fi
+        shell: bash
+        continue-on-error: true
+
+      - name: Set Pylint .py Status
+        if: ${{ env.PY_FILE_COUNT > 0 }}
+        run: |
+          if [ -f pylint_py_exit_code.txt ] && [ "$(cat pylint_py_exit_code.txt)" = "0" ]; then
+            echo "PYLINT_PY_STATUS=success" >> "$GITHUB_ENV"
+          else
+            echo "PYLINT_PY_STATUS=failed" >> "$GITHUB_ENV"
+          fi
+        shell: bash
+
+      - name: Skip Pylint for .py (no files)
+        if: ${{ env.PY_FILE_COUNT == 0 }}
+        run: |
+          echo "✅ No modified .py files found, skipping Pylint for .py"
+          echo "PYLINT_PY_STATUS=skipped" >> "$GITHUB_ENV"
+
+      - name: Run Pylint for .ipynb files (nbqa + Array Args)
+        if: ${{ env.IPYNB_FILE_COUNT > 0 }}
+        run: |
+          NUM_CORES=$(nproc)
+          echo "🔧 Running Pylint on modified .ipynb files..."
+
+          declare -a IPYNB_FILES=()
+          while IFS= read -r file; do
+            [ -n "$file" ] && IPYNB_FILES+=("$file")
+          done <<< "${{ env.VALID_CHANGED_IPYNB }}"
+
+          nbqa pylint "${IPYNB_FILES[@]}" --jobs=$NUM_CORES --rcfile=.github/pylint.conf 2>&1 | tee pylint_ipynb_logs.txt
+          NBQA_EXIT_CODE=${PIPESTATUS[0]}
+
+          echo "$NBQA_EXIT_CODE" > pylint_ipynb_exit_code.txt
+
+          if [ $NBQA_EXIT_CODE -eq 0 ]; then
+            echo "✅ .ipynb files Pylint check passed"
+          else
+            echo "❌ .ipynb files Pylint check failed, see details in pylint_ipynb_logs.txt"
+          fi
+        shell: bash
+        continue-on-error: true
+
+      - name: Set Pylint .ipynb Status
+        if: ${{ env.IPYNB_FILE_COUNT > 0 }}
+        run: |
+          if [ -f pylint_ipynb_exit_code.txt ] && [ "$(cat pylint_ipynb_exit_code.txt)" = "0" ]; then
+            echo "PYLINT_IPYNB_STATUS=success" >> "$GITHUB_ENV"
+          else
+            echo "PYLINT_IPYNB_STATUS=failed" >> "$GITHUB_ENV"
+          fi
+        shell: bash
+
+      - name: Skip Pylint for .ipynb (no files)
+        if: ${{ env.IPYNB_FILE_COUNT == 0 }}
+        run: |
+          echo "✅ No modified .ipynb files found, skipping Pylint for .ipynb"
+          echo "PYLINT_IPYNB_STATUS=skipped" >> "$GITHUB_ENV"
+
+      - name: Summarize Pylint Check Results
+        run: |
+          echo "===== Pylint Check Summary ====="
+          echo ".py files status: ${{ env.PYLINT_PY_STATUS }}"
+          echo ".ipynb files status: ${{ env.PYLINT_IPYNB_STATUS }}"
+          echo "================================="
           
-          # Cleanup
-          rm -rf "$TEMP_DIR"
+          FAIL=0
+          if [ "${{ env.PYLINT_PY_STATUS }}" = "failed" ]; then
+            echo "❌ .py files failed Pylint check. Please check the 'Run Pylint for .py files' step above for detailed errors."
+            FAIL=1
+          fi
+          
+          if [ "${{ env.PYLINT_IPYNB_STATUS }}" = "failed" ]; then
+            echo "❌ .ipynb files failed Pylint check. Please check the 'Run Pylint for .ipynb files' step above for detailed errors."
+            FAIL=1
+          fi
+          
+          if [ $FAIL -eq 1 ]; then
+            echo "❌ Pylint check has failed items, CI terminated. Fix the errors above and try again."
+            exit 1
+          fi
+        shell: bash
+
+  markdownlint-check:
+    name: Markdownlint Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Get PR changed .ipynb and .md files (Robust)
+        id: get_pr_changed_files
+        run: |
+          set -euo pipefail
+
+          declare -a VALID_CHANGED_IPYNB=()
+          declare -a VALID_CHANGED_MD=()
+          ALL_CHANGED_FILES=""
+
+          if ! command -v jq &> /dev/null; then
+            sudo apt update -y && sudo apt install jq -y || { echo "❌ Failed to install jq"; exit 1; }
+          fi
+
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "🔍 PR Mode: Get changed files via GitHub API (with retry)"
+            # ========== 核心修改2：markdownlint 环节的 curl 也改成参数数组 ==========
+            declare -a CURL_ARGS=(
+              -s
+              --retry 3
+              --retry-delay 2
+              -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}"
+              -H "Accept: application/vnd.github+json"
+              -H "X-GitHub-Api-Version: 2022-11-28"
+              "https://api.github.com/repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files"
+            )
+            ALL_CHANGED_FILES=$(curl "${CURL_ARGS[@]}" | jq -r '.[] | select(.status != "removed") | .filename' || echo "")
+          else
+            echo "🔍 Push Mode: Get changed files via git diff"
+            if git rev-parse --verify HEAD^ >/dev/null 2>&1; then
+              ALL_CHANGED_FILES=$(git diff --name-only HEAD^ HEAD --diff-filter=ACMRT)
+            else
+              ALL_CHANGED_FILES=$(git ls-files)
+            fi
+          fi
+
+          while IFS= read -r file; do
+            if [ -z "$file" ] || [ ! -f "$file" ] || [ ! -s "$file" ]; then
+              continue
+            fi
+            if [[ "$file" =~ [\n\r\"\'\\] ]]; then
+              echo "⚠️ Skip file with invalid characters: $file"
+              continue
+            fi
+            if [[ "$file" =~ \.ipynb$ ]]; then
+              VALID_CHANGED_IPYNB+=("$file")
+            elif [[ "$file" =~ \.md$ ]]; then
+              VALID_CHANGED_MD+=("$file")
+            fi
+          done <<< "$ALL_CHANGED_FILES"
+
+          echo "VALID_CHANGED_IPYNB<<EOF" >> "$GITHUB_ENV"
+          printf "%s\n" "${VALID_CHANGED_IPYNB[@]}" >> "$GITHUB_ENV"
+          echo "EOF" >> "$GITHUB_ENV"
+
+          echo "VALID_CHANGED_MD<<EOF" >> "$GITHUB_ENV"
+          printf "%s\n" "${VALID_CHANGED_MD[@]}" >> "$GITHUB_ENV"
+          echo "EOF" >> "$GITHUB_ENV"
+
+          echo "======================================"
+          echo "===== PR Changed Files Summary ====="
+          echo "✅  Changed .ipynb files (to extract):"
+          if [ ${#VALID_CHANGED_IPYNB[@]} -eq 0 ]; then
+            echo "  - None"
+          else
+            for f in "${VALID_CHANGED_IPYNB[@]}"; do echo "  - $f"; done
+          fi
+          echo "✅  Changed .md files (to lint directly):"
+          if [ ${#VALID_CHANGED_MD[@]} -eq 0 ]; then
+            echo "  - None"
+          else
+            for f in "${VALID_CHANGED_MD[@]}"; do echo "  - $f"; done
+          fi
+          echo "======================================"
+        shell: bash
+
+      - name: Extract Markdown from PR changed .ipynb files (Robust)
+        id: extract_md
+        run: |
+          set -euo pipefail
+
+          TARGET_DIR="./temp_md"
+          MAP_FILE="./md_ipynb_mapping.log"
+          ERROR_LOG="./extract_error.log"
+
+          echo "TARGET_DIR=$TARGET_DIR" >> "$GITHUB_ENV"
+          echo "MAP_FILE=$MAP_FILE" >> "$GITHUB_ENV"
+
+          mkdir -p "$TARGET_DIR" || { echo "❌ Failed to create $TARGET_DIR"; exit 1; }
+          if [ ! -w "$TARGET_DIR" ]; then
+            echo "❌ $TARGET_DIR is not writable"; exit 1;
+          fi
+          rm -rf "$TARGET_DIR"/* || true
+          rm -f "$MAP_FILE" "$ERROR_LOG" || true
+
+          if [ ${#VALID_CHANGED_IPYNB[@]} -eq 0 ]; then
+            echo "ℹ️  No changed .ipynb files to process, skipping extraction"
+            exit 0
+          fi
+
+          for nb_file in "${VALID_CHANGED_IPYNB[@]}"; do
+            if [ -z "$nb_file" ] || [ ! -f "$nb_file" ] || [ ! -s "$nb_file" ]; then
+              echo "ℹ️  Skip invalid/empty file: $nb_file" >> "$ERROR_LOG"
+              continue
+            fi
+
+            if ! jq . "$nb_file" > /dev/null 2>&1; then
+              error_msg="JSON parse failed (corrupted file)"
+              echo "❌ Skip $nb_file: $error_msg"
+              echo "ERROR: $nb_file - $error_msg" >> "$ERROR_LOG"
+              continue
+            fi
+
+            nb_relpath="${nb_file#./}"
+            md_file="$TARGET_DIR/${nb_relpath%.ipynb}.md"
+            mkdir -p "$(dirname "$md_file")" || { echo "⚠️ Skip create dir for $md_file"; continue; }
+            if [ ! -w "$(dirname "$md_file")" ]; then
+              echo "⚠️ $md_file directory not writable"; continue;
+            fi
+
+            markdown_content=$(jq -r '
+              try (
+                .cells | to_entries[] |
+                select(.value.cell_type == "markdown") |
+                "<!-- CELL_IDX: \(.key) -->\n" +
+                (.value.source | if type == "array" then join("") else tostring end)
+              ) catch ""
+            ' "$nb_file" 2>> "$ERROR_LOG")
+            jq_exit_code=$?
+
+            if [ $jq_exit_code -ne 0 ] || [ -z "$markdown_content" ]; then
+              error_msg="JQ extraction failed or no content (exit code: $jq_exit_code)"
+              echo "❌ Skip $nb_file: $error_msg"
+              echo "ERROR: $nb_file - $error_msg" >> "$ERROR_LOG"
+              rm -f "$md_file"
+              continue
+            fi
+
+            echo "$markdown_content" > "$md_file"
+            sync "$md_file" || true
+
+            md_line=0
+            cell_idx=0
+            while IFS= read -r line; do
+              md_line=$((md_line + 1))
+              if echo "$line" | grep -q '<!-- CELL_IDX: [0-9]\+ -->'; then
+                cell_idx=$(echo "$line" | cut -d ':' -f 2 | cut -d ' ' -f 2)
+                continue
+              fi
+              echo "$nb_file,$cell_idx,$md_file,$md_line" >> "$MAP_FILE" || true
+            done < "$md_file"
+
+            echo "✅ Extracted: $nb_file → $md_file"
+          done
+
+          echo -e "\n======================================"
+          echo "===== Extraction Logs ======"
+          if [ -s "$ERROR_LOG" ]; then
+            echo "❌ Skipped files (errors):"
+            cat "$ERROR_LOG" | sort | uniq
+          else
+            echo "✅ No extraction errors"
+          fi
+          map_line_count=0
+          if [ -f "$MAP_FILE" ]; then
+            map_line_count=$(wc -l < "$MAP_FILE" 2>/dev/null || echo 0)
+          fi
+          echo "✅ Mapping file: $MAP_FILE (lines: $map_line_count)"
+          echo "======================================"
+        shell: bash
+
+      - name: Run markdownlint (Array Args + Full Tracing)
+        if: ${{ env.VALID_CHANGED_IPYNB != '' || env.VALID_CHANGED_MD != '' }}
+        run: |
+          set +e
+          export PYTHONUNBUFFERED=1
+          export NODE_UNBUFFERED=1
+
+          npm install -g markdownlint-cli@${{ env.MARKDOWNLINT_CLI_VERSION }} || { echo "❌ Failed to install markdownlint-cli"; exit 1; }
+
+          declare -a LINT_FILES=()
+
+          while IFS= read -r file; do
+            [ -n "$file" ] && LINT_FILES+=("$file")
+          done <<< "${{ env.VALID_CHANGED_MD }}"
+
+          if [ -d "${{ env.TARGET_DIR }}" ]; then
+            while IFS= read -r file; do
+              [ -f "$file" ] && LINT_FILES+=("$file")
+            done < <(find "${{ env.TARGET_DIR }}" -name "*.md" -type f)
+          fi
+
+          echo -e "\n===== Markdownlint Check Paths ====="
+          if [ ${#LINT_FILES[@]} -eq 0 ]; then
+            echo "  - None"
+          else
+            for path in "${LINT_FILES[@]}"; do echo "  - $path"; done
+          fi
+          echo "======================================"
+
+          markdownlint "${LINT_FILES[@]}" --config .github/.markdownlint.json > markdownlint_force.log 2>&1
+          LINT_EXIT_CODE=$?
+
+          if [ $LINT_EXIT_CODE -ne 0 ]; then
+            echo -e "\n===== Markdownlint Errors (Traced to IPYNB) ====="
+
+            cat markdownlint_force.log | grep -v "^$" | grep -v "=====" | while IFS= read -r err_line; do
+              if ! [[ "$err_line" =~ ^[^:]+:[0-9]+ ]]; then
+                continue
+              fi
+
+              ERR_BASE=$(echo "$err_line" | cut -d' ' -f1)
+              ERR_MSG=$(echo "$err_line" | cut -d' ' -f2-)
+
+              MD_FILE="$ERR_BASE"
+              while [[ "$MD_FILE" =~ :[0-9]+$ ]]; do
+                MD_FILE=$(echo "$MD_FILE" | rev | cut -d':' -f2- | rev)
+              done
+              MD_LINE=$(echo "$ERR_BASE" | rev | cut -d':' -f1 | rev)
+              if [[ "$MD_LINE" =~ :[0-9]+$ ]]; then
+                MD_LINE=$(echo "$MD_LINE" | cut -d':' -f1)
+              fi
+              if ! [[ "$MD_LINE" =~ ^[0-9]+$ ]]; then
+                continue
+              fi
+
+              if command -v realpath >/dev/null 2>&1; then
+                MD_FILE_REL=$(realpath --relative-to=. "$MD_FILE" 2>/dev/null || echo "$MD_FILE")
+              else
+                MD_FILE_REL="$MD_FILE"
+              fi
+
+              IPYNB_FOUND="false"
+              if [ -f "${{ env.MAP_FILE }}" ]; then
+                ALL_MAPPINGS=$(grep -F "$MD_FILE_REL" "${{ env.MAP_FILE }}")
+                if [ -n "$ALL_MAPPINGS" ]; then
+                  MATCHED_MAPPING=""
+                  MAX_MAPPED_LINE=0
+                  while IFS= read -r mapping_line; do
+                    MAP_IPYNB=$(echo "$mapping_line" | cut -d',' -f1)
+                    MAP_CELL=$(echo "$mapping_line" | cut -d',' -f2)
+                    MAP_MD_LINE=$(echo "$mapping_line" | cut -d',' -f4)
+                    if [[ "$MAP_MD_LINE" =~ ^[0-9]+$ ]] && [ "$MAP_MD_LINE" -le "$MD_LINE" ] && [ "$MAP_MD_LINE" -gt "$MAX_MAPPED_LINE" ]; then
+                      MAX_MAPPED_LINE="$MAP_MD_LINE"
+                      MATCHED_MAPPING="$mapping_line"
+                    fi
+                  done <<< "$ALL_MAPPINGS"
+
+                  FALLBACK_MAPPING=""
+                  MIN_MAPPED_LINE=999999
+                  if [ -z "$MATCHED_MAPPING" ] && [ -n "$ALL_MAPPINGS" ]; then
+                    while IFS= read -r mapping_line; do
+                      MAP_MD_LINE=$(echo "$mapping_line" | cut -d',' -f4)
+                      if [[ "$MAP_MD_LINE" =~ ^[0-9]+$ ]] && [ "$MAP_MD_LINE" -lt "$MIN_MAPPED_LINE" ]; then
+                        MIN_MAPPED_LINE="$MAP_MD_LINE"
+                        FALLBACK_MAPPING="$mapping_line"
+                      fi
+                    done <<< "$ALL_MAPPINGS"
+                  fi
+
+                  if [ -n "$MATCHED_MAPPING" ]; then
+                    IPYNB_FILE=$(echo "$MATCHED_MAPPING" | cut -d',' -f1)
+                    CELL_IDX=$(echo "$MATCHED_MAPPING" | cut -d',' -f2)
+                    echo -e "❌ Error in ORIGINAL IPYNB (cell approximate):"
+                    echo -e "  IPYNB File: $IPYNB_FILE (cell: $CELL_IDX)"
+                    echo -e "  Temp MD File: $MD_FILE_REL (line: $MD_LINE, in cell $CELL_IDX)"
+                    echo -e "  Error: $ERR_MSG"
+                    IPYNB_FOUND="true"
+                  elif [ -n "$FALLBACK_MAPPING" ]; then
+                    IPYNB_FILE=$(echo "$FALLBACK_MAPPING" | cut -d',' -f1)
+                    CELL_IDX=$(echo "$FALLBACK_MAPPING" | cut -d',' -f2)
+                    echo -e "❌ Error in ORIGINAL IPYNB (min line fallback):"
+                    echo -e "  IPYNB File: $IPYNB_FILE (cell: $CELL_IDX)"
+                    echo -e "  Temp MD File: $MD_FILE_REL (line: $MD_LINE, fallback to min mapped line $MIN_MAPPED_LINE)"
+                    echo -e "  Error: $ERR_MSG"
+                    IPYNB_FOUND="true"
+                  fi
+                fi
+              fi
+
+              if [ "$IPYNB_FOUND" = "false" ]; then
+                if [[ "$MD_FILE_REL" == temp_md/* ]]; then
+                  echo -e "❌ Error in Extracted MD File (no IPYNB mapping):"
+                  echo -e "  MD File: $MD_FILE_REL (line: $MD_LINE)"
+                  echo -e "  Error: $ERR_MSG"
+                  echo -e "  Hint: Check the original IPYNB file corresponding to this MD file (path: ${MD_FILE_REL/temp_md\//})."
+                else
+                  echo -e "❌ Error in Native MD File:"
+                  echo -e "  File: $MD_FILE_REL (line: $MD_LINE)"
+                  echo -e "  Error: $ERR_MSG"
+                fi
+              fi
+              echo -e "--------------------------------------"
+            done
+            exit $LINT_EXIT_CODE
+          else
+            echo -e "\n✅ All files passed markdownlint check!"
+            exit 0
+          fi
+        shell: bash
+        continue-on-error: false
+
+      - name: Skip Markdownlint (no files)
+        if: ${{ env.VALID_CHANGED_IPYNB == '' && env.VALID_CHANGED_MD == '' }}
+        run: |
+          echo "✅ No changed MD/IPYNB files, skipping markdownlint"
+
+      - name: Clean up temporary files (Always)
+        if: ${{ always() }}
+        run: |
+          rm -rf temp_md || true
+          rm -f md_ipynb_mapping.log extract_error.log markdownlint_force.log || true
         shell: bash
