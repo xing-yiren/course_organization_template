@@ -91,7 +91,7 @@ jobs:
           find . -type f -name "*.py" -o -name "*.ipynb" | head -20
         shell: bash
 
-      - name: Get Modified Files (Enhanced Unicode Support)
+           - name: Get Modified Files (Enhanced Unicode Support)
         id: get_modified_files
         run: |
           # Enable strict mode but careful with IFS
@@ -226,90 +226,91 @@ jobs:
             echo "$ALL_CHANGED_FILES" > "$TEMP_DIR/raw_files.txt"
             
             # Use Python to process files (handles Unicode correctly)
-            python3 -c '
+            # 修复：使用双引号包裹整个命令，内部引号使用转义
+            python3 -c "
 import os
 import sys
 import json
 from pathlib import Path
 
 # Setup
-temp_dir = os.environ.get("TEMP_DIR", "/tmp")
+temp_dir = os.environ.get('TEMP_DIR', '/tmp')
 valid_py = []
 valid_ipynb = []
 errors = []
 all_files = []
 
 # Read all files
-raw_file_path = os.path.join(temp_dir, "raw_files.txt")
+raw_file_path = os.path.join(temp_dir, 'raw_files.txt')
 if os.path.exists(raw_file_path):
-    with open(raw_file_path, "r", encoding="utf-8") as f:
+    with open(raw_file_path, 'r', encoding='utf-8') as f:
         all_files = [line.strip() for line in f if line.strip()]
 
-print(f"Processing {len(all_files)} files...")
+print(f'Processing {len(all_files)} files...')
 
 for file_path in all_files:
     # Clean path
-    file_path = file_path.strip().rstrip("\r")
+    file_path = file_path.strip().rstrip('\r')
     if not file_path:
         continue
     
     # Check if file exists (might have been deleted)
     if not os.path.exists(file_path):
-        errors.append(f"File does not exist (deleted?): {file_path}")
+        errors.append(f'File does not exist (deleted?): {file_path}')
         continue
     
     # Check if file is empty
     if os.path.getsize(file_path) == 0:
-        errors.append(f"Empty file skipped: {file_path}")
+        errors.append(f'Empty file skipped: {file_path}')
         continue
     
     # Get file extension (case insensitive)
     ext = Path(file_path).suffix.lower()
     
-    if ext == ".py":
+    if ext == '.py':
         valid_py.append(file_path)
-    elif ext == ".ipynb":
+    elif ext == '.ipynb':
         # Validate notebook JSON
         try:
-            with open(file_path, "r", encoding="utf-8") as f:
+            with open(file_path, 'r', encoding='utf-8') as f:
                 json.load(f)
             valid_ipynb.append(file_path)
         except json.JSONDecodeError as e:
-            errors.append(f"Invalid notebook JSON - {file_path}: {str(e)}")
+            errors.append(f'Invalid notebook JSON - {file_path}: {str(e)}')
         except Exception as e:
-            errors.append(f"Error reading notebook - {file_path}: {str(e)}")
+            errors.append(f'Error reading notebook - {file_path}: {str(e)}')
     # Other file types are ignored
 
 # Save results
-py_file_path = os.path.join(temp_dir, "valid_py.txt")
-ipynb_file_path = os.path.join(temp_dir, "valid_ipynb.txt")
-error_file_path = os.path.join(temp_dir, "errors.log")
+py_file_path = os.path.join(temp_dir, 'valid_py.txt')
+ipynb_file_path = os.path.join(temp_dir, 'valid_ipynb.txt')
+error_file_path = os.path.join(temp_dir, 'errors.log')
 
-with open(py_file_path, "w", encoding="utf-8") as f:
-    f.write("\n".join(valid_py))
+with open(py_file_path, 'w', encoding='utf-8') as f:
+    f.write('\n'.join(valid_py))
 
-with open(ipynb_file_path, "w", encoding="utf-8") as f:
-    f.write("\n".join(valid_ipynb))
+with open(ipynb_file_path, 'w', encoding='utf-8') as f:
+    f.write('\n'.join(valid_ipynb))
 
-with open(error_file_path, "w", encoding="utf-8") as f:
-    f.write("\n".join(errors))
+with open(error_file_path, 'w', encoding='utf-8') as f:
+    f.write('\n'.join(errors))
 
 # Also create JSON file with all info (for later steps)
 files_json = {
-    "py": valid_py,
-    "ipynb": valid_ipynb,
-    "errors": errors
+    'py': valid_py,
+    'ipynb': valid_ipynb,
+    'errors': errors
 }
 
-json_path = os.path.join(temp_dir, "files.json")
-with open(json_path, "w", encoding="utf-8") as f:
+json_path = os.path.join(temp_dir, 'files.json')
+with open(json_path, 'w', encoding='utf-8') as f:
     json.dump(files_json, f, ensure_ascii=False, indent=2)
 
 # Print summary
-print(f"\nFound {len(valid_py)} Python files, {len(valid_ipynb)} notebook files")
+print(f'\nFound {len(valid_py)} Python files, {len(valid_ipynb)} notebook files')
 if errors:
-    print(f"Warnings/Errors: {len(errors)}")
-'
+    print(f'Warnings/Errors: {len(errors)}')
+"
           fi
           
           # Read results from Python
