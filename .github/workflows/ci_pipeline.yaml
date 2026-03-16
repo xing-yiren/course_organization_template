@@ -1,5 +1,4 @@
-# 工作流名称：CI 流水线（高健壮性版本）
-name: CI Pipeline (Robust Version)
+name: CI Pipeline
 
 # 触发规则：Push/PR 触发，同时支持手动触发（便于测试）
 on:
@@ -23,25 +22,25 @@ env:
 jobs:
   # ========== Job 1：Pylint 检查（.py 和 .ipynb 文件） ==========
   pylint-check:
-    name: Pylint 代码检查
+    name: Pylint Check
     runs-on: ubuntu-latest     # 运行环境：最新版 Ubuntu
     timeout-minutes: 15        # 超时保护：15分钟未完成则终止（避免卡死）
     steps:
       # 步骤1：拉取代码到 CI 服务器
-      - name: 拉取仓库代码
+      - name: Checkout Code
         uses: actions/checkout@v4
         with:
           fetch-depth: 0       # 拉取完整提交历史（便于对比改动文件）
 
       # 步骤2：配置 Python 环境
-      - name: 配置 Python 环境
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"  # 指定 Python 版本
           cache: "pip"            # 缓存 pip 依赖（加速后续安装）
 
       # 步骤3：安装依赖（锁定版本，避免兼容性问题）
-      - name: 安装依赖包
+      - name: Install dependencies
         run: |
           # 升级 pip 并锁定版本
           python -m pip install --upgrade pip==${{ env.PIP_VERSION }}
@@ -56,7 +55,7 @@ jobs:
         shell: bash
 
       # 步骤4：筛选改动的 .py/.ipynb 文件（核心：兼容特殊文件名）
-      - name: 筛选改动的 Python/IPYNB 文件
+      - name: Get Modified .py/.ipynb Files
         id: get_modified_files
         run: |
           # 开启严格模式：
@@ -159,7 +158,7 @@ jobs:
         shell: bash
 
       # 步骤5：运行 Pylint 检查 .py 文件（数组传参，兼容特殊文件名）
-      - name: 检查 .py 文件（Pylint）
+      - name: Run Pylint for .py files
         if: ${{ env.PY_FILE_COUNT > 0 }}  # 只有存在 .py 文件时才执行
         run: |
           NUM_CORES=$(nproc)  # 获取 CPU 核心数（用于并行检查）
@@ -188,7 +187,7 @@ jobs:
         continue-on-error: true  # 检查失败不终止整个 workflow
 
       # 步骤6：设置 .py 文件检查状态
-      - name: 设置 .py 文件检查状态
+      - name: Set Pylint .py Status
         if: ${{ env.PY_FILE_COUNT > 0 }}
         run: |
           # 读取退出码，设置状态（success/failed）
@@ -200,7 +199,7 @@ jobs:
         shell: bash
 
       # 步骤7：跳过 .py 文件检查（无文件时）
-      - name: 跳过 .py 文件检查
+      - name: Skip Pylint for .py (no files)
         if: ${{ env.PY_FILE_COUNT == 0 }}
         run: |
           echo "✅ 无改动的 .py 文件，跳过检查"
@@ -208,7 +207,7 @@ jobs:
         shell: bash
 
       # 步骤8：运行 Pylint 检查 .ipynb 文件（nbqa 适配）
-      - name: 检查 .ipynb 文件（nbqa + Pylint）
+      - name: Run Pylint for .ipynb files (via nbqa)
         if: ${{ env.IPYNB_FILE_COUNT > 0 }}
         run: |
           NUM_CORES=$(nproc)
@@ -237,7 +236,7 @@ jobs:
         continue-on-error: true
 
       # 步骤9：设置 .ipynb 文件检查状态
-      - name: 设置 .ipynb 文件检查状态
+      - name: Set Pylint .ipynb Status
         if: ${{ env.IPYNB_FILE_COUNT > 0 }}
         run: |
           if [ -f pylint_ipynb_exit_code.txt ] && [ "$(cat pylint_ipynb_exit_code.txt)" = "0" ]; then
@@ -248,7 +247,7 @@ jobs:
         shell: bash
 
       # 步骤10：跳过 .ipynb 文件检查（无文件时）
-      - name: 跳过 .ipynb 文件检查
+      - name: Skip Pylint for .ipynb (no files)
         if: ${{ env.IPYNB_FILE_COUNT == 0 }}
         run: |
           echo "✅ 无改动的 .ipynb 文件，跳过检查"
@@ -256,7 +255,7 @@ jobs:
         shell: bash
 
       # 步骤11：汇总 Pylint 检查结果（失败则终止 CI）
-      - name: 汇总 Pylint 检查结果
+      - name: Summarize Pylint Check Results
         run: |
           echo "===== Pylint 检查汇总 ====="
           echo ".py 文件状态：${{ env.PYLINT_PY_STATUS }}"
@@ -266,25 +265,25 @@ jobs:
           # 标记是否失败
           FAIL=0
           if [ "${{ env.PYLINT_PY_STATUS }}" = "failed" ]; then
-            echo "❌ .py 文件检查失败，请修复后重试"
+            echo "❌ .py files failed Pylint check. Please check the 'Run Pylint for .py files' step above for detailed errors."
             FAIL=1
           fi
           
           if [ "${{ env.PYLINT_IPYNB_STATUS }}" = "failed" ]; then
-            echo "❌ .ipynb 文件检查失败，请修复后重试"
+            echo "❌ .ipynb files failed Pylint check. Please check the 'Run Pylint for .ipynb files' step above for detailed errors."
             FAIL=1
           fi
           
           # 失败则退出 CI
           if [ $FAIL -eq 1 ]; then
-            echo "❌ Pylint 检查未通过，CI 终止"
+            echo "❌ Pylint check has failed items, CI terminated. Fix the errors above and try again."
             exit 1
           fi
         shell: bash
 
   # ========== Job 2：Markdown 检查（.md 和 .ipynb 中的 Markdown） ==========
   markdownlint-check:
-    name: Markdown 格式检查
+    name: Markdownlint Check
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -292,13 +291,13 @@ jobs:
       pull-requests: write     # 写入 PR 评论权限（如需）
     steps:
       # 步骤1：拉取代码
-      - name: 拉取仓库代码
+      - name: Checkout Code
         uses: actions/checkout@v4
         with:
           fetch-depth: 1        # 仅拉取最新代码（无需历史）
 
       # 步骤2：筛选改动的 .ipynb/.md 文件
-      - name: 筛选改动的 IPYNB/MD 文件
+      - name: Get PR changed .ipynb and .md files
         id: get_pr_changed_files
         run: |
           set -euo pipefail
@@ -381,7 +380,7 @@ jobs:
         shell: bash
 
       # 步骤3：从 .ipynb 提取 Markdown 内容（核心修复：空数组兼容）
-      - name: 从 IPYNB 提取 Markdown 内容
+      - name: Extract Markdown from PR changed .ipynb files
         id: extract_md
         run: |
           set -euo pipefail
@@ -507,7 +506,7 @@ jobs:
         shell: bash
 
       # 步骤4：运行 markdownlint 检查（数组传参）
-      - name: 检查 Markdown 格式（markdownlint）
+      - name: Run markdownlint (full IPYNB error tracing)
         if: ${{ env.VALID_CHANGED_IPYNB != '' || env.VALID_CHANGED_MD != '' }}
         run: |
           set +e  # 关闭严格模式（避免检查失败直接退出）
@@ -660,14 +659,14 @@ jobs:
         continue-on-error: false  # 检查失败则终止 CI
 
       # 步骤5：跳过 Markdown 检查（无文件时）
-      - name: 跳过 Markdown 检查
+      - name: Skip Markdownlint (no files)
         if: ${{ env.VALID_CHANGED_IPYNB == '' && env.VALID_CHANGED_MD == '' }}
         run: |
           echo "✅ 无改动的 MD/IPYNB 文件，跳过 Markdown 检查"
         shell: bash
 
       # 步骤6：清理临时文件（无论成败都执行）
-      - name: 清理临时文件
+      - name: Clean up temporary files
         if: ${{ always() }}
         run: |
           rm -rf temp_md || true                          # 删除临时 MD 目录
