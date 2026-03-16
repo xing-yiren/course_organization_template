@@ -388,11 +388,11 @@ jobs:
           # ========== 核心修复：初始化数组（避免 unbound variable 错误） ==========
           # 定义数组并从环境变量恢复（兼容空值）
           declare -a VALID_CHANGED_IPYNB=()
-          if [ -n "${VALID_CHANGED_IPYNB:-}" ]; then
-            while IFS= read -r file; do
-              [ -n "$file" ] && VALID_CHANGED_IPYNB+=("$file")
-            done <<< "$VALID_CHANGED_IPYNB"
-          fi
+          while IFS= read -r file; do
+            if [ -n "$file" ]; then
+              VALID_CHANGED_IPYNB+=("$file")
+            fi
+          done <<< "${{ env.VALID_CHANGED_IPYNB }}"
 
           # ========== 配置路径 ==========
           TARGET_DIR="./temp_md"          # 临时 MD 文件目录
