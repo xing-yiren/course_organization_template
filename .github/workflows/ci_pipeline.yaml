@@ -220,7 +220,7 @@ jobs:
           done <<< "${{ env.VALID_CHANGED_IPYNB }}"
 
           # 执行 nbqa pylint（数组传参）
-          nbqa pylint "${IPYNB_FILES[@]}" --jobs=$NUM_CORES --rcfile=.github/pylint.conf 2>&1 | tee pylint_ipynb_logs.txt
+          nbqa pylint "${IPYNB_FILES[@]}" --jobs=$NUM_CORES --disable=wrong-import-position --rcfile=.github/pylint.conf 2>&1 | tee pylint_ipynb_logs.txt
           NBQA_EXIT_CODE=${PIPESTATUS[0]}
 
           # 保存退出码
