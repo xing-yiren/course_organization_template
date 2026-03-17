@@ -1,0 +1,674 @@
+name: CI Pipeline
+
+# 触发规则：Push/PR 触发，同时支持手动触发（便于测试）
+on:
+  push:
+    branches: [ "*" ]          # 所有分支 Push 时触发
+  pull_request:
+    branches: [ "*" ]          # 所有分支 PR 时触发
+  workflow_dispatch:           # 手动触发开关
+
+# 全局环境变量：统一配置编码和工具版本（避免硬编码）
+env:
+  LC_ALL: en_US.UTF-8          # 统一 UTF-8 编码，解决中文乱码
+  LANG: en_US.UTF-8
+  LC_CTYPE: en_US.UTF-8
+  PIP_VERSION: "24.0"         # 锁定 pip 版本
+  MARKDOWNLINT_CLI_VERSION: "0.39.0"  # 锁定 markdownlint-cli 版本
+  PYLINT_VERSION: "3.2.2"     # 锁定 pylint 版本
+  NBQA_VERSION: "1.8.6"       # 锁定 nbqa 版本
+
+# 定义两个并行 Job：Pylint 代码检查、Markdown 格式检查
+jobs:
+  # ========== Job 1：Pylint 检查（.py 和 .ipynb 文件） ==========
+  pylint-check:
+    name: Pylint Check
+    runs-on: ubuntu-latest     # 运行环境：最新版 Ubuntu
+    timeout-minutes: 15        # 超时保护：15分钟未完成则终止（避免卡死）
+    steps:
+      # 步骤1：拉取代码到 CI 服务器
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0       # 拉取完整提交历史（便于对比改动文件）
+
+      # 步骤2：配置 Python 环境
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"  # 指定 Python 版本
+          cache: "pip"            # 缓存 pip 依赖（加速后续安装）
+
+      # 步骤3：安装依赖（锁定版本，避免兼容性问题）
+      - name: Install dependencies
+        run: |
+          # 升级 pip 并锁定版本
+          python -m pip install --upgrade pip==${{ env.PIP_VERSION }}
+          # 安装 torch（CPU 版本，避免 GPU 依赖）
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          # 安装代码检查工具（锁定版本）
+          pip install pylint==${{ env.PYLINT_VERSION }} nbqa==${{ env.NBQA_VERSION }}
+          # 安装项目自定义依赖（如果有 requirements.txt）
+          if [ -f "requirements.txt" ]; then 
+            pip install -r requirements.txt 
+          fi
+        shell: bash
+
+      # 步骤4：筛选改动的 .py/.ipynb 文件（核心：兼容特殊文件名）
+      - name: Get Modified .py/.ipynb Files
+        id: get_modified_files
+        run: |
+          # 开启严格模式：
+          # -e: 命令失败则脚本退出
+          # -u: 引用未定义变量则报错
+          # -o pipefail: 管道命令任一失败则整体失败
+          set -euo pipefail
+
+          # ========== 初始化变量 ==========
+          # 用数组存储文件路径（核心：避免空格/特殊字符拆分）
+          declare -a VALID_CHANGED_PY=()     # 改动的 .py 文件数组
+          declare -a VALID_CHANGED_IPYNB=()  # 改动的 .ipynb 文件数组
+          ALL_CHANGED_FILES=""               # 所有改动文件的临时变量
+
+          # ========== 安装 jq 工具（解析 JSON） ==========
+          # 先检查是否已安装，避免重复安装
+          if ! command -v jq &> /dev/null; then
+            sudo apt update -y && sudo apt install jq -y || { echo "❌ 安装 jq 失败"; exit 1; }
+          fi
+
+          # ========== 获取改动文件列表 ==========
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "🔍 PR 模式：通过 GitHub API 获取改动文件（带重试）"
+            # 定义 curl 参数数组（核心：避免参数拆分）
+            declare -a CURL_ARGS=(
+              -s                              # 静默模式，不输出进度
+              --retry 3                       # 失败重试3次
+              --retry-delay 2                 # 重试间隔2秒
+              -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}"  # 身份验证
+              -H "Accept: application/vnd.github+json"               # 指定 JSON 响应
+              -H "X-GitHub-Api-Version: 2022-11-28"                 # API 版本
+              "https://api.github.com/repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files"  # API 地址
+            )
+            # 执行 curl（数组传参），解析出未删除的文件列表
+            ALL_CHANGED_FILES=$(curl "${CURL_ARGS[@]}" | jq -r '.[] | select(.status != "removed") | .filename' || echo "")
+          else
+            echo "🔍 Push 模式：通过 git diff 获取改动文件"
+            # 判断是否是首次提交（无 HEAD^）
+            if git rev-parse --verify HEAD^ >/dev/null 2>&1; then
+              # 获取本次改动的文件（排除删除的文件）
+              ALL_CHANGED_FILES=$(git diff --name-only HEAD^ HEAD --diff-filter=ACMRT)
+            else
+              # 首次提交：获取所有文件
+              ALL_CHANGED_FILES=$(git ls-files)
+            fi
+          fi
+
+          # ========== 筛选目标文件（.py/.ipynb） ==========
+          while IFS= read -r file; do
+            # 跳过空行、已删除文件、空文件
+            if [ -z "$file" ] || [ ! -f "$file" ] || [ ! -s "$file" ]; then
+              continue
+            fi
+            # 只检查真正的非法字符（如果有必要）
+            if [[ "$file" =~ [$'\n\r'] ]]; then  # 只检查换行符和回车符
+              echo "⚠️ Skip file with line breaks: $file"
+              continue
+            fi
+            # 分类存入数组
+            if [[ "$file" =~ \.py$ ]]; then
+              VALID_CHANGED_PY+=("$file")
+            elif [[ "$file" =~ \.ipynb$ ]]; then
+              VALID_CHANGED_IPYNB+=("$file")
+            fi
+          done <<< "$ALL_CHANGED_FILES"
+
+          # ========== 导出变量到环境（供后续步骤使用） ==========
+          # 数组转换行分隔字符串（GitHub Actions 仅支持字符串传递）
+          echo "VALID_CHANGED_PY<<EOF" >> "$GITHUB_ENV"
+          printf "%s\n" "${VALID_CHANGED_PY[@]}" >> "$GITHUB_ENV"
+          echo "EOF" >> "$GITHUB_ENV"
+
+          echo "VALID_CHANGED_IPYNB<<EOF" >> "$GITHUB_ENV"
+          printf "%s\n" "${VALID_CHANGED_IPYNB[@]}" >> "$GITHUB_ENV"
+          echo "EOF" >> "$GITHUB_ENV"
+
+          # 统计文件数量
+          PY_FILE_COUNT=${#VALID_CHANGED_PY[@]}
+          IPYNB_FILE_COUNT=${#VALID_CHANGED_IPYNB[@]}
+
+          echo "PY_FILE_COUNT=$PY_FILE_COUNT" >> "$GITHUB_ENV"
+          echo "IPYNB_FILE_COUNT=$IPYNB_FILE_COUNT" >> "$GITHUB_ENV"
+
+          # ========== 打印筛选结果（便于调试） ==========
+          echo "======================================"
+          echo "===== 改动文件汇总 ====="
+          echo "✅ 待检查的 .py 文件："
+          if [ $PY_FILE_COUNT -eq 0 ]; then
+            echo "  - 无"
+          else
+            for f in "${VALID_CHANGED_PY[@]}"; do echo "  - $f"; done
+          fi
+          echo "✅ 待检查的 .ipynb 文件："
+          if [ $IPYNB_FILE_COUNT -eq 0 ]; then
+            echo "  - 无"
+          else
+            for f in "${VALID_CHANGED_IPYNB[@]}"; do echo "  - $f"; done
+          fi
+          echo "======================================"
+        shell: bash
+
+      # 步骤5：运行 Pylint 检查 .py 文件（数组传参，兼容特殊文件名）
+      - name: Run Pylint for .py files
+        if: ${{ env.PY_FILE_COUNT > 0 }}  # 只有存在 .py 文件时才执行
+        run: |
+          NUM_CORES=$(nproc)  # 获取 CPU 核心数（用于并行检查）
+          echo "🔧 开始检查 .py 文件（并行核心数：$NUM_CORES）"
+
+          # 从环境变量恢复数组（解决 Actions 无法传递数组的问题）
+          declare -a PY_FILES=()
+          while IFS= read -r file; do
+            [ -n "$file" ] && PY_FILES+=("$file")
+          done <<< "${{ env.VALID_CHANGED_PY }}"
+
+          # 执行 Pylint（数组传参，避免路径拆分）
+          pylint "${PY_FILES[@]}" --jobs=$NUM_CORES --rcfile=.github/pylint.conf 2>&1 | tee pylint_py_logs.txt
+          PYLINT_EXIT_CODE=${PIPESTATUS[0]}  # 获取 pylint 真实退出码（排除 tee 影响）
+
+          # 保存退出码（供后续步骤判断）
+          echo "$PYLINT_EXIT_CODE" > pylint_py_exit_code.txt
+
+          # 打印检查结果
+          if [ $PYLINT_EXIT_CODE -eq 0 ]; then
+            echo "✅ .py 文件 Pylint 检查通过"
+          else
+            echo "❌ .py 文件 Pylint 检查失败，详见 pylint_py_logs.txt"
+          fi
+        shell: bash
+        continue-on-error: true  # 检查失败不终止整个 workflow
+
+      # 步骤6：设置 .py 文件检查状态
+      - name: Set Pylint .py Status
+        if: ${{ env.PY_FILE_COUNT > 0 }}
+        run: |
+          # 读取退出码，设置状态（success/failed）
+          if [ -f pylint_py_exit_code.txt ] && [ "$(cat pylint_py_exit_code.txt)" = "0" ]; then
+            echo "PYLINT_PY_STATUS=success" >> "$GITHUB_ENV"
+          else
+            echo "PYLINT_PY_STATUS=failed" >> "$GITHUB_ENV"
+          fi
+        shell: bash
+
+      # 步骤7：跳过 .py 文件检查（无文件时）
+      - name: Skip Pylint for .py (no files)
+        if: ${{ env.PY_FILE_COUNT == 0 }}
+        run: |
+          echo "✅ 无改动的 .py 文件，跳过检查"
+          echo "PYLINT_PY_STATUS=skipped" >> "$GITHUB_ENV"
+        shell: bash
+
+      # 步骤8：运行 Pylint 检查 .ipynb 文件（nbqa 适配）
+      - name: Run Pylint for .ipynb files (via nbqa)
+        if: ${{ env.IPYNB_FILE_COUNT > 0 }}
+        run: |
+          NUM_CORES=$(nproc)
+          echo "🔧 开始检查 .ipynb 文件（并行核心数：$NUM_CORES）"
+
+          # 从环境变量恢复数组
+          declare -a IPYNB_FILES=()
+          while IFS= read -r file; do
+            [ -n "$file" ] && IPYNB_FILES+=("$file")
+          done <<< "${{ env.VALID_CHANGED_IPYNB }}"
+
+          # 执行 nbqa pylint（数组传参）
+          nbqa pylint "${IPYNB_FILES[@]}" --jobs=$NUM_CORES --disable=wrong-import-position --rcfile=.github/pylint.conf 2>&1 | tee pylint_ipynb_logs.txt
+          NBQA_EXIT_CODE=${PIPESTATUS[0]}
+
+          # 保存退出码
+          echo "$NBQA_EXIT_CODE" > pylint_ipynb_exit_code.txt
+
+          # 打印检查结果
+          if [ $NBQA_EXIT_CODE -eq 0 ]; then
+            echo "✅ .ipynb 文件 Pylint 检查通过"
+          else
+            echo "❌ .ipynb 文件 Pylint 检查失败，详见 pylint_ipynb_logs.txt"
+          fi
+        shell: bash
+        continue-on-error: true
+
+      # 步骤9：设置 .ipynb 文件检查状态
+      - name: Set Pylint .ipynb Status
+        if: ${{ env.IPYNB_FILE_COUNT > 0 }}
+        run: |
+          if [ -f pylint_ipynb_exit_code.txt ] && [ "$(cat pylint_ipynb_exit_code.txt)" = "0" ]; then
+            echo "PYLINT_IPYNB_STATUS=success" >> "$GITHUB_ENV"
+          else
+            echo "PYLINT_IPYNB_STATUS=failed" >> "$GITHUB_ENV"
+          fi
+        shell: bash
+
+      # 步骤10：跳过 .ipynb 文件检查（无文件时）
+      - name: Skip Pylint for .ipynb (no files)
+        if: ${{ env.IPYNB_FILE_COUNT == 0 }}
+        run: |
+          echo "✅ 无改动的 .ipynb 文件，跳过检查"
+          echo "PYLINT_IPYNB_STATUS=skipped" >> "$GITHUB_ENV"
+        shell: bash
+
+      # 步骤11：汇总 Pylint 检查结果（失败则终止 CI）
+      - name: Summarize Pylint Check Results
+        run: |
+          echo "===== Pylint 检查汇总 ====="
+          echo ".py 文件状态：${{ env.PYLINT_PY_STATUS }}"
+          echo ".ipynb 文件状态：${{ env.PYLINT_IPYNB_STATUS }}"
+          echo "================================="
+          
+          # 标记是否失败
+          FAIL=0
+          if [ "${{ env.PYLINT_PY_STATUS }}" = "failed" ]; then
+            echo "❌ .py files failed Pylint check. Please check the 'Run Pylint for .py files' step above for detailed errors."
+            FAIL=1
+          fi
+          
+          if [ "${{ env.PYLINT_IPYNB_STATUS }}" = "failed" ]; then
+            echo "❌ .ipynb files failed Pylint check. Please check the 'Run Pylint for .ipynb files' step above for detailed errors."
+            FAIL=1
+          fi
+          
+          # 失败则退出 CI
+          if [ $FAIL -eq 1 ]; then
+            echo "❌ Pylint check has failed items, CI terminated. Fix the errors above and try again."
+            exit 1
+          fi
+        shell: bash
+
+  # ========== Job 2：Markdown 检查（.md 和 .ipynb 中的 Markdown） ==========
+  markdownlint-check:
+    name: Markdownlint Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read           # 读取仓库内容权限
+      pull-requests: write     # 写入 PR 评论权限（如需）
+    steps:
+      # 步骤1：拉取代码
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1        # 仅拉取最新代码（无需历史）
+
+      # 步骤2：筛选改动的 .ipynb/.md 文件
+      - name: Get PR changed .ipynb and .md files
+        id: get_pr_changed_files
+        run: |
+          set -euo pipefail
+
+          # ========== 初始化数组 ==========
+          declare -a VALID_CHANGED_IPYNB=()
+          declare -a VALID_CHANGED_MD=()
+          ALL_CHANGED_FILES=""
+
+          # ========== 安装 jq ==========
+          if ! command -v jq &> /dev/null; then
+            sudo apt update -y && sudo apt install jq -y || { echo "❌ 安装 jq 失败"; exit 1; }
+          fi
+
+          # ========== 获取改动文件 ==========
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "🔍 PR 模式：通过 GitHub API 获取改动文件（带重试）"
+            # curl 参数数组化
+            declare -a CURL_ARGS=(
+              -s
+              --retry 3
+              --retry-delay 2
+              -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}"
+              -H "Accept: application/vnd.github+json"
+              -H "X-GitHub-Api-Version: 2022-11-28"
+              "https://api.github.com/repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files"
+            )
+            ALL_CHANGED_FILES=$(curl "${CURL_ARGS[@]}" | jq -r '.[] | select(.status != "removed") | .filename' || echo "")
+          else
+            echo "🔍 Push 模式：通过 git diff 获取改动文件"
+            if git rev-parse --verify HEAD^ >/dev/null 2>&1; then
+              ALL_CHANGED_FILES=$(git diff --name-only HEAD^ HEAD --diff-filter=ACMRT)
+            else
+              ALL_CHANGED_FILES=$(git ls-files)
+            fi
+          fi
+
+          # ========== 筛选目标文件 ==========
+          while IFS= read -r file; do
+            if [ -z "$file" ] || [ ! -f "$file" ] || [ ! -s "$file" ]; then
+              continue
+            fi
+            # 只检查真正的非法字符（如果有必要）
+            if [[ "$file" =~ [$'\n\r'] ]]; then  # 只检查换行符和回车符
+              echo "⚠️ Skip file with line breaks: $file"
+              continue
+            fi
+            if [[ "$file" =~ \.ipynb$ ]]; then
+              VALID_CHANGED_IPYNB+=("$file")
+            elif [[ "$file" =~ \.md$ ]]; then
+              VALID_CHANGED_MD+=("$file")
+            fi
+          done <<< "$ALL_CHANGED_FILES"
+
+          # ========== 导出变量 ==========
+          echo "VALID_CHANGED_IPYNB<<EOF" >> "$GITHUB_ENV"
+          printf "%s\n" "${VALID_CHANGED_IPYNB[@]}" >> "$GITHUB_ENV"
+          echo "EOF" >> "$GITHUB_ENV"
+
+          echo "VALID_CHANGED_MD<<EOF" >> "$GITHUB_ENV"
+          printf "%s\n" "${VALID_CHANGED_MD[@]}" >> "$GITHUB_ENV"
+          echo "EOF" >> "$GITHUB_ENV"
+
+          # ========== 打印结果 ==========
+          echo "======================================"
+          echo "===== 改动文件汇总 ====="
+          echo "✅ 待提取的 .ipynb 文件："
+          if [ ${#VALID_CHANGED_IPYNB[@]} -eq 0 ]; then
+            echo "  - 无"
+          else
+            for f in "${VALID_CHANGED_IPYNB[@]}"; do echo "  - $f"; done
+          fi
+          echo "✅ 待检查的 .md 文件："
+          if [ ${#VALID_CHANGED_MD[@]} -eq 0 ]; then
+            echo "  - 无"
+          else
+            for f in "${VALID_CHANGED_MD[@]}"; do echo "  - $f"; done
+          fi
+          echo "======================================"
+        shell: bash
+
+      # 步骤3：从 .ipynb 提取 Markdown 内容（核心修复：空数组兼容）
+      - name: Extract Markdown from PR changed .ipynb files
+        id: extract_md
+        run: |
+          set -euo pipefail
+
+          # ========== 核心修复：初始化数组（避免 unbound variable 错误） ==========
+          # 定义数组并从环境变量恢复（兼容空值）
+          declare -a VALID_CHANGED_IPYNB=()
+          while IFS= read -r file; do
+            if [ -n "$file" ]; then
+              VALID_CHANGED_IPYNB+=("$file")
+            fi
+          done <<< "${{ env.VALID_CHANGED_IPYNB }}"
+
+          # ========== 配置路径 ==========
+          TARGET_DIR="./temp_md"          # 临时 MD 文件目录
+          MAP_FILE="./md_ipynb_mapping.log"  # 映射文件（关联原始 IPYNB 和临时 MD）
+          ERROR_LOG="./extract_error.log"    # 提取错误日志
+
+          # 导出路径到环境
+          echo "TARGET_DIR=$TARGET_DIR" >> "$GITHUB_ENV"
+          echo "MAP_FILE=$MAP_FILE" >> "$GITHUB_ENV"
+
+          # ========== 初始化目录 ==========
+          # 创建临时目录（检查权限）
+          mkdir -p "$TARGET_DIR" || { echo "❌ 创建临时目录失败"; exit 1; }
+          # 检查目录可写性
+          if [ ! -w "$TARGET_DIR" ]; then
+            echo "❌ 临时目录不可写"; exit 1;
+          fi
+          # 清空旧文件（避免残留）
+          rm -rf "$TARGET_DIR"/* || true
+          rm -f "$MAP_FILE" "$ERROR_LOG" || true
+
+          # ========== 无 IPYNB 文件则跳过 ==========
+          if [ ${#VALID_CHANGED_IPYNB[@]} -eq 0 ]; then
+            echo "ℹ️  无改动的 .ipynb 文件，跳过 Markdown 提取"
+            exit 0
+          fi
+
+          # ========== 遍历 IPYNB 文件提取 MD ==========
+          for nb_file in "${VALID_CHANGED_IPYNB[@]}"; do
+            # 跳过无效/空文件
+            if [ -z "$nb_file" ] || [ ! -f "$nb_file" ] || [ ! -s "$nb_file" ]; then
+              echo "ℹ️  跳过无效/空文件：$nb_file" >> "$ERROR_LOG"
+              continue
+            fi
+
+            # 校验 JSON 格式（IPYNB 本质是 JSON）
+            if ! jq . "$nb_file" > /dev/null 2>&1; then
+              error_msg="JSON 解析失败（文件损坏）"
+              echo "❌ 跳过文件：$nb_file - $error_msg"
+              echo "ERROR: $nb_file - $error_msg" >> "$ERROR_LOG"
+              continue
+            fi
+
+            # 生成临时 MD 文件路径（兼容空格/中文）
+            nb_relpath="${nb_file#./}"                  # 去掉开头的 ./
+            md_file="$TARGET_DIR/${nb_relpath%.ipynb}.md"  # 替换后缀为 .md
+
+            # 创建子目录（检查权限）
+            mkdir -p "$(dirname "$md_file")" || { echo "⚠️  创建子目录失败：$md_file"; continue; }
+            if [ ! -w "$(dirname "$md_file")" ]; then
+              echo "⚠️  子目录不可写：$md_file"; continue;
+            fi
+
+            # 提取 Markdown 内容（保留单元格索引）
+            markdown_content=$(jq -r '
+              try (
+                .cells | to_entries[] |
+                select(.value.cell_type == "markdown") |
+                "<!-- CELL_IDX: \(.key) -->\n" +  # 标记单元格索引（用于溯源）
+                (.value.source | if type == "array" then join("") else tostring end)
+              ) catch ""
+            ' "$nb_file" 2>> "$ERROR_LOG")
+            jq_exit_code=$?
+
+            # 跳过提取失败/无内容的文件
+            if [ $jq_exit_code -ne 0 ] || [ -z "$markdown_content" ]; then
+              error_msg="Markdown 提取失败或无内容（退出码：$jq_exit_code）"
+              echo "❌ 跳过文件：$nb_file - $error_msg"
+              echo "ERROR: $nb_file - $error_msg" >> "$ERROR_LOG"
+              rm -f "$md_file"
+              continue
+            fi
+
+            # 写入临时 MD 文件（兼容特殊字符）
+            echo "$markdown_content" > "$md_file"
+            sync "$md_file" || true  # 强制写入磁盘
+
+            # ========== 生成映射表（用于错误溯源） ==========
+            md_line=0
+            cell_idx=0
+            while IFS= read -r line; do
+              md_line=$((md_line + 1))
+              # 匹配单元格索引标记
+              if echo "$line" | grep -q '<!-- CELL_IDX: [0-9]\+ -->'; then
+                cell_idx=$(echo "$line" | cut -d ':' -f 2 | cut -d ' ' -f 2)
+                continue
+              fi
+              # 写入映射表：原始IPYNB,单元格索引,临时MD,行号
+              echo "$nb_file,$cell_idx,$md_file,$md_line" >> "$MAP_FILE" || true
+            done < "$md_file"
+
+            echo "✅ 提取完成：$nb_file → $md_file"
+          done
+
+          # ========== 打印提取日志 ==========
+          echo -e "\n======================================"
+          echo "===== 提取日志 ======"
+          if [ -s "$ERROR_LOG" ]; then
+            echo "❌ 跳过的文件（错误）："
+            cat "$ERROR_LOG" | sort | uniq
+          else
+            echo "✅ 无提取错误"
+          fi
+          # 统计映射表行数
+          map_line_count=0
+          if [ -f "$MAP_FILE" ]; then
+            map_line_count=$(wc -l < "$MAP_FILE" 2>/dev/null || echo 0)
+          fi
+          echo "✅ 映射文件：$MAP_FILE（行数：$map_line_count）"
+          echo "======================================"
+        shell: bash
+
+      # 步骤4：运行 markdownlint 检查（数组传参）
+      - name: Run markdownlint (full IPYNB error tracing)
+        if: ${{ env.VALID_CHANGED_IPYNB != '' || env.VALID_CHANGED_MD != '' }}
+        run: |
+          set +e  # 关闭严格模式（避免检查失败直接退出）
+          export PYTHONUNBUFFERED=1  # 禁用 Python 缓冲输出
+          export NODE_UNBUFFERED=1   # 禁用 Node 缓冲输出
+
+          # ========== 安装 markdownlint-cli（锁定版本） ==========
+          npm install -g markdownlint-cli@${{ env.MARKDOWNLINT_CLI_VERSION }} || { echo "❌ 安装 markdownlint-cli 失败"; exit 1; }
+
+          # ========== 初始化待检查文件数组 ==========
+          declare -a LINT_FILES=()
+
+          # 添加原生 MD 文件（从环境变量恢复数组）
+          while IFS= read -r file; do
+            [ -n "$file" ] && LINT_FILES+=("$file")
+          done <<< "${{ env.VALID_CHANGED_MD }}"
+
+          # 添加提取的 MD 文件（遍历临时目录）
+          if [ -d "${{ env.TARGET_DIR }}" ]; then
+            while IFS= read -r file; do
+              [ -f "$file" ] && LINT_FILES+=("$file")
+            done < <(find "${{ env.TARGET_DIR }}" -name "*.md" -type f)
+          fi
+
+          # ========== 打印待检查文件 ==========
+          echo -e "\n===== Markdown 检查文件列表 ====="
+          if [ ${#LINT_FILES[@]} -eq 0 ]; then
+            echo "  - 无"
+          else
+            for path in "${LINT_FILES[@]}"; do echo "  - $path"; done
+          fi
+          echo "======================================"
+
+          # ========== 执行 markdownlint ==========
+          markdownlint "${LINT_FILES[@]}" --config .github/.markdownlint.json > markdownlint_force.log 2>&1
+          LINT_EXIT_CODE=$?
+
+          # ========== 错误溯源（核心：兼容特殊文件名） ==========
+          if [ $LINT_EXIT_CODE -ne 0 ]; then
+            echo -e "\n===== Markdown 错误详情（关联原始文件） ====="
+
+            # 遍历错误日志
+            cat markdownlint_force.log | grep -v "^$" | grep -v "=====" | while IFS= read -r err_line; do
+              # 跳过非错误行
+              if ! [[ "$err_line" =~ ^[^:]+:[0-9]+ ]]; then
+                continue
+              fi
+
+              # 解析错误信息：文件路径:行号 错误信息
+              ERR_BASE=$(echo "$err_line" | cut -d' ' -f1)  # 文件路径:行号
+              ERR_MSG=$(echo "$err_line" | cut -d' ' -f2-)   # 错误信息
+
+              # 提取文件路径（去掉行号/列号）
+              MD_FILE="$ERR_BASE"
+              while [[ "$MD_FILE" =~ :[0-9]+$ ]]; do
+                MD_FILE=$(echo "$MD_FILE" | rev | cut -d':' -f2- | rev)
+              done
+              # 提取行号
+              MD_LINE=$(echo "$ERR_BASE" | rev | cut -d':' -f1 | rev)
+              if [[ "$MD_LINE" =~ :[0-9]+$ ]]; then
+                MD_LINE=$(echo "$MD_LINE" | cut -d':' -f1)
+              fi
+              # 过滤无效行号
+              if ! [[ "$MD_LINE" =~ ^[0-9]+$ ]]; then
+                continue
+              fi
+
+              # 转换为相对路径（兼容空格/中文）
+              if command -v realpath >/dev/null 2>&1; then
+                MD_FILE_REL=$(realpath --relative-to=. "$MD_FILE" 2>/dev/null || echo "$MD_FILE")
+              else
+                MD_FILE_REL="$MD_FILE"
+              fi
+
+              # ========== 关联原始 IPYNB 文件 ==========
+              IPYNB_FOUND="false"
+              if [ -f "${{ env.MAP_FILE }}" ]; then
+                # 匹配映射表中的临时 MD 文件
+                ALL_MAPPINGS=$(grep -F "$MD_FILE_REL" "${{ env.MAP_FILE }}")
+                if [ -n "$ALL_MAPPINGS" ]; then
+                  MATCHED_MAPPING=""
+                  MAX_MAPPED_LINE=0
+                  # 遍历映射表找最接近的行号
+                  while IFS= read -r mapping_line; do
+                    MAP_IPYNB=$(echo "$mapping_line" | cut -d',' -f1)    # 原始 IPYNB
+                    MAP_CELL=$(echo "$mapping_line" | cut -d',' -f2)     # 单元格索引
+                    MAP_MD_LINE=$(echo "$mapping_line" | cut -d',' -f4)  # MD 行号
+                    # 找到小于等于当前行号的最大行号
+                    if [[ "$MAP_MD_LINE" =~ ^[0-9]+$ ]] && [ "$MAP_MD_LINE" -le "$MD_LINE" ] && [ "$MAP_MD_LINE" -gt "$MAX_MAPPED_LINE" ]; then
+                      MAX_MAPPED_LINE="$MAP_MD_LINE"
+                      MATCHED_MAPPING="$mapping_line"
+                    fi
+                  done <<< "$ALL_MAPPINGS"
+
+                  # 兜底匹配（最小行号）
+                  FALLBACK_MAPPING=""
+                  MIN_MAPPED_LINE=999999
+                  if [ -z "$MATCHED_MAPPING" ] && [ -n "$ALL_MAPPINGS" ]; then
+                    while IFS= read -r mapping_line; do
+                      MAP_MD_LINE=$(echo "$mapping_line" | cut -d',' -f4)
+                      if [[ "$MAP_MD_LINE" =~ ^[0-9]+$ ]] && [ "$MAP_MD_LINE" -lt "$MIN_MAPPED_LINE" ]; then
+                        MIN_MAPPED_LINE="$MAP_MD_LINE"
+                        FALLBACK_MAPPING="$mapping_line"
+                      fi
+                    done <<< "$ALL_MAPPINGS"
+                  fi
+
+                  # 打印溯源结果
+                  if [ -n "$MATCHED_MAPPING" ]; then
+                    IPYNB_FILE=$(echo "$MATCHED_MAPPING" | cut -d',' -f1)
+                    CELL_IDX=$(echo "$MATCHED_MAPPING" | cut -d',' -f2)
+                    echo -e "❌ 原始 IPYNB 文件错误（单元格近似匹配）："
+                    echo -e "  IPYNB 文件：$IPYNB_FILE（单元格：$CELL_IDX）"
+                    echo -e "  临时 MD 文件：$MD_FILE_REL（行号：$MD_LINE）"
+                    echo -e "  错误信息：$ERR_MSG"
+                    IPYNB_FOUND="true"
+                  elif [ -n "$FALLBACK_MAPPING" ]; then
+                    IPYNB_FILE=$(echo "$FALLBACK_MAPPING" | cut -d',' -f1)
+                    CELL_IDX=$(echo "$FALLBACK_MAPPING" | cut -d',' -f2)
+                    echo -e "❌ 原始 IPYNB 文件错误（最小行号兜底）："
+                    echo -e "  IPYNB 文件：$IPYNB_FILE（单元格：$CELL_IDX）"
+                    echo -e "  临时 MD 文件：$MD_FILE_REL（行号：$MD_LINE）"
+                    echo -e "  错误信息：$ERR_MSG"
+                    IPYNB_FOUND="true"
+                  fi
+                fi
+              fi
+
+              # ========== 未匹配到 IPYNB 时打印原生错误 ==========
+              if [ "$IPYNB_FOUND" = "false" ]; then
+                if [[ "$MD_FILE_REL" == temp_md/* ]]; then
+                  echo -e "❌ 提取的 MD 文件错误（无 IPYNB 映射）："
+                  echo -e "  MD 文件：$MD_FILE_REL（行号：$MD_LINE）"
+                  echo -e "  错误信息：$ERR_MSG"
+                  echo -e "  提示：请检查对应的原始 IPYNB 文件（路径：${MD_FILE_REL/temp_md\//}）"
+                else
+                  echo -e "❌ 原生 MD 文件错误："
+                  echo -e "  MD 文件：$MD_FILE_REL（行号：$MD_LINE）"
+                  echo -e "  错误信息：$ERR_MSG"
+                fi
+              fi
+              echo -e "--------------------------------------"
+            done
+            exit $LINT_EXIT_CODE  # 退出并返回错误码
+          else
+            echo -e "\n✅ 所有 Markdown 文件检查通过！"
+            exit 0
+          fi
+        shell: bash
+        continue-on-error: false  # 检查失败则终止 CI
+
+      # 步骤5：跳过 Markdown 检查（无文件时）
+      - name: Skip Markdownlint (no files)
+        if: ${{ env.VALID_CHANGED_IPYNB == '' && env.VALID_CHANGED_MD == '' }}
+        run: |
+          echo "✅ 无改动的 MD/IPYNB 文件，跳过 Markdown 检查"
+        shell: bash
+
+      # 步骤6：清理临时文件（无论成败都执行）
+      - name: Clean up temporary files
+        if: ${{ always() }}
+        run: |
+          rm -rf temp_md || true                          # 删除临时 MD 目录
+          rm -f md_ipynb_mapping.log extract_error.log markdownlint_force.log || true  # 删除日志文件
+        shell: bash
